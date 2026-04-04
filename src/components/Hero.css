@@ -70,8 +70,8 @@
 
 .hero-image-wrapper {
   position: relative;
-  width: 450px;
-  height: 600px;
+  width: 500px;
+  height: 650px;
   z-index: 2;
   margin: 0 auto;
 }
@@ -169,8 +169,8 @@
   }
 
   .hero-image-wrapper {
-    width: 300px;
-    height: 400px;
+    width: 400px;
+    height: 500px;
   }
 
   .hero-bottom-info {
