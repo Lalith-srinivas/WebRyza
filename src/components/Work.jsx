@@ -49,7 +49,7 @@ const projects = [
     category: 'Demo',
     desc: 'Starting from ₹4,999. Admissions & events page, Faculty & infrastructure, Gallery & achievements.',
     img: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80',
-    link: '#'
+    link: 'https://webryza-school-demo.vercel.app/'
   },
   {
     id: 7,
