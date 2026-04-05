@@ -1,0 +1,8 @@
+.scroll-reveal-text {
+  display: inline-flex;
+  flex-wrap: wrap;
+  line-height: inherit;
+}
+.scroll-word {
+  will-change: opacity, filter, transform;
+}
