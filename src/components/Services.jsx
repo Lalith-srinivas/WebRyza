@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutTemplate, Code2, MonitorPlay, ShoppingCart, Rocket } from 'lucide-react';
+import { LayoutTemplate, Code2, MonitorPlay, ShoppingCart, Rocket, chart-no-axes-combined} from 'lucide-react';
 import ScrollReveal from './ScrollReveal';
 import './Services.css';
 
@@ -32,7 +32,7 @@ const servicesData = [
   {
     title: 'Business Growth',
     desc: 'Helping your business grow with conversion-focused websites, WhatsApp integration, and strategies that turn visitors into real customers.',
-    icon: <Graph size={32}/>
+    icon: <chart-no-axes-combined size={32}/>
   }
 ];
 
