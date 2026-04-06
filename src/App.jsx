@@ -24,5 +24,23 @@ function App() {
     </Router>
   );
 }
+function App() {
+  // Initialize scroll reveal animations
+  useReveal();
+
+  return (
+    <div className="App">
+      <Navbar />
+      <main>
+        <Hero />
+        <Services />
+        <Work />
+        <CTA />
+        <Contact />
+      </main>
+      <Footer />
+    </div>
+  );
+}
 
 export default App;

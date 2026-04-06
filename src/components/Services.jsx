@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutTemplate, Code2, MonitorPlay, ShoppingCart, Rocket } from 'lucide-react';
+import { LayoutTemplate, Code2, MonitorPlay, ShoppingCart, Rocket, LucideLineChart } from 'lucide-react';
 import ScrollReveal from './ScrollReveal';
 import './Services.css';
 
@@ -28,6 +28,11 @@ const servicesData = [
     title: 'Landing Pages',
     desc: 'High-converting, laser-focused landing pages designed to maximize your marketing ROI.',
     icon: <Rocket size={32} />
+  },
+  {
+    title: 'Business Growth',
+    desc: 'Helping your business grow with conversion-focused websites, WhatsApp integration, and strategies that turn visitors into real customers.',
+    icon: <LucideLineChart size={32} />
   }
 ];
 

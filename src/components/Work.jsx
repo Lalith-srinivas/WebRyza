@@ -77,6 +77,7 @@ const Work = () => {
             // Adaptive top offset for mobile vs desktop
             // Increased offset for mobile/tablet to ensure "View Demo" button is visible
             const offset = typeof window !== 'undefined' && window.innerWidth < 768 ? 160 : 40;
+            const offset = typeof window !== 'undefined' && window.innerWidth < 768 ? 80 : 40;
             return (
               <div 
                 key={project.id} 

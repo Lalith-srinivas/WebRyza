@@ -27,6 +27,13 @@ const Navbar = () => {
     setIsMobileMenuOpen(false);
   };
 
+    { name: 'Home', href: '#home' },
+    { name: 'Services', href: '#services' },
+    { name: 'Work', href: '#work' },
+    { name: 'Contact', href: '#contact' },
+  ];
+
+
   return (
     <nav className={`navbar ${isScrolled ? 'scrolled' : ''}`}>
       <div className="container nav-container">
@@ -36,6 +43,8 @@ const Navbar = () => {
           <ul className="nav-links">
             <li key="Home"><a href="/#home">Home</a></li>
             <li key="Services"><a href="/#services">Services</a></li>
+            <li key="Home"><a href="#home">Home</a></li>
+            <li key="Services"><a href="#services">Services</a></li>
           </ul>
         </div>
 
@@ -43,12 +52,17 @@ const Navbar = () => {
         <Link to="/" className="logo" onClick={() => window.scrollTo(0,0)}>
           WebRyza<span className="text-neon">.</span>
         </Link>
+        <a href="#home" className="logo">
+          WebRyza<span className="text-neon">.</span>
+        </a>
 
         {/* Right Links (Desktop Only) */}
         <div className="nav-group right-nav">
           <ul className="nav-links">
             <li key="Work"><a href="/#work">Work</a></li>
             <li key="Contact"><a href="/#contact">Contact</a></li>
+            <li key="Work"><a href="#work">Work</a></li>
+            <li key="Contact"><a href="#contact">Contact</a></li>
           </ul>
         </div>
 
@@ -67,12 +81,14 @@ const Navbar = () => {
           {navLinks.map((link) => (
             <li key={link.name}>
               <a href={link.href} onClick={handleLinkClick}>
+              <a href={link.href} onClick={() => setIsMobileMenuOpen(false)}>
                 {link.name}
               </a>
             </li>
           ))}
         </ul>
         <a href="/#contact" className="btn btn-primary" onClick={handleLinkClick}>
+        <a href="#contact" className="btn btn-primary" onClick={() => setIsMobileMenuOpen(false)}>
           Let's Talk
         </a>
       </div>
