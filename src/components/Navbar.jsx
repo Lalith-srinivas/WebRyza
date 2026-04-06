@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import './Navbar.css';
 
 const Navbar = () => {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const location = useLocation();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -17,52 +16,34 @@ const Navbar = () => {
   }, []);
 
   const navLinks = [
-    { name: 'Home', href: '/#home' },
-    { name: 'Services', href: '/#services' },
-    { name: 'Work', href: '/#work' },
-    { name: 'Contact', href: '/#contact' },
-  ];
-
-  const handleLinkClick = () => {
-    setIsMobileMenuOpen(false);
-  };
-
     { name: 'Home', href: '#home' },
     { name: 'Services', href: '#services' },
     { name: 'Work', href: '#work' },
     { name: 'Contact', href: '#contact' },
   ];
 
-
   return (
     <nav className={`navbar ${isScrolled ? 'scrolled' : ''}`}>
       <div className="container nav-container">
-        
-        {/* Left Links (Desktop Only) */}
+
+        {/* Left Links */}
         <div className="nav-group left-nav">
           <ul className="nav-links">
-            <li key="Home"><a href="/#home">Home</a></li>
-            <li key="Services"><a href="/#services">Services</a></li>
-            <li key="Home"><a href="#home">Home</a></li>
-            <li key="Services"><a href="#services">Services</a></li>
+            <li><a href="#home">Home</a></li>
+            <li><a href="#services">Services</a></li>
           </ul>
         </div>
 
-        {/* Centered Logo */}
+        {/* Logo */}
         <Link to="/" className="logo" onClick={() => window.scrollTo(0,0)}>
           WebRyza<span className="text-neon">.</span>
         </Link>
-        <a href="#home" className="logo">
-          WebRyza<span className="text-neon">.</span>
-        </a>
 
-        {/* Right Links (Desktop Only) */}
+        {/* Right Links */}
         <div className="nav-group right-nav">
           <ul className="nav-links">
-            <li key="Work"><a href="/#work">Work</a></li>
-            <li key="Contact"><a href="/#contact">Contact</a></li>
-            <li key="Work"><a href="#work">Work</a></li>
-            <li key="Contact"><a href="#contact">Contact</a></li>
+            <li><a href="#work">Work</a></li>
+            <li><a href="#contact">Contact</a></li>
           </ul>
         </div>
 
@@ -75,20 +56,23 @@ const Navbar = () => {
         </button>
       </div>
 
-      {/* Mobile Menu Overlay */}
+      {/* Mobile Menu */}
       <div className={`mobile-menu ${isMobileMenuOpen ? 'open' : ''}`}>
         <ul className="mobile-nav-links">
           {navLinks.map((link) => (
             <li key={link.name}>
-              <a href={link.href} onClick={handleLinkClick}>
               <a href={link.href} onClick={() => setIsMobileMenuOpen(false)}>
                 {link.name}
               </a>
             </li>
           ))}
         </ul>
-        <a href="/#contact" className="btn btn-primary" onClick={handleLinkClick}>
-        <a href="#contact" className="btn btn-primary" onClick={() => setIsMobileMenuOpen(false)}>
+
+        <a 
+          href="#contact" 
+          className="btn btn-primary" 
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
           Let's Talk
         </a>
       </div>
