@@ -28,6 +28,11 @@ const servicesData = [
     title: 'Landing Pages',
     desc: 'High-converting, laser-focused landing pages designed to maximize your marketing ROI.',
     icon: <Rocket size={32} />
+  },
+  {
+    title: 'Business Growth',
+    desc: 'Helping your business grow with conversion-focused websites, WhatsApp integration, and strategies that turn visitors into real customers.',
+    icon: <Graph size={32}/>
   }
 ];
 
