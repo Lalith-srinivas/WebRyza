@@ -57,7 +57,7 @@ const projects = [
     category: 'Demo',
     desc: 'Starting from ₹14,999. Cart & checkout system, Payment gateway integration, Admin panel & analytics.',
     img: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=800&q=80',
-    link: '#'
+    link: 'https://webryza-ecommerce-demo.vercel.app/'
   }
 ];
 
