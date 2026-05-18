@@ -25,6 +25,7 @@ const Footer = () => {
               <li><a href="/#services">Services</a></li>
               <li><a href="/#work">Work</a></li>
               <li><a href="/#contact">Contact</a></li>
+              <li><Link to="/webryza-admin">Admin Dashboard</Link></li>
             </ul>
           </div>
 
