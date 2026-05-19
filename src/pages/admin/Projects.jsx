@@ -21,6 +21,7 @@ export default function Projects() {
     category: 'cafe',
     price: '',
     offer: '',
+    link: '',
     process: 'building'
   });
 
@@ -62,6 +63,7 @@ export default function Projects() {
         category: project.category,
         price: project.price,
         offer: project.offer,
+        link: project.link || '',
         process: project.process
       });
     } else {
@@ -71,6 +73,7 @@ export default function Projects() {
         category: 'cafe',
         price: '',
         offer: '',
+        link: '',
         process: 'building'
       });
     }
@@ -157,6 +160,7 @@ export default function Projects() {
                 <th>Category</th>
                 <th>Price</th>
                 <th>Offer</th>
+                <th>Link</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -176,6 +180,13 @@ export default function Projects() {
                     <td style={{ textTransform: 'capitalize' }}>{project.category}</td>
                     <td>₹{project.price?.toLocaleString()}</td>
                     <td>{project.offer || '-'}</td>
+                    <td>
+                      {project.link ? (
+                        <a href={project.link} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-neon)', textDecoration: 'none' }}>
+                          View
+                        </a>
+                      ) : '-'}
+                    </td>
                     <td>
                       <span className={`status-badge ${project.process}`}>
                         {project.process}
@@ -271,6 +282,17 @@ export default function Projects() {
                       placeholder="e.g. 20% OFF"
                     />
                   </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Project Link (Optional)</label>
+                  <input 
+                    type="url" 
+                    name="link" 
+                    value={formData.link} 
+                    onChange={handleInputChange} 
+                    placeholder="https://..."
+                  />
                 </div>
 
                 <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }}>
