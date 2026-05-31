@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 // ============================================================
 // CONFIGURATION — Replace with your n8n Chat Webhook URL
 // ============================================================
-const N8N_CHAT_URL = "https://lalithsrinivas.app.n8n.cloud/webhook/7cc7e887-96f6-41ef-b592-cdd3528b630b/chat";
+const N8N_CHAT_URL = import.meta.env.VITE_N8N_WEBHOOK_URL;
 // e.g. "https://your-n8n.com/webhook/webryza-chat"
 // ============================================================
 
