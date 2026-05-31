@@ -22,6 +22,7 @@ export default function Projects() {
     price: '',
     offer: '',
     link: '',
+    phone: '',
     process: 'building'
   });
 
@@ -64,6 +65,7 @@ export default function Projects() {
         price: project.price,
         offer: project.offer,
         link: project.link || '',
+        phone: project.phone || '',
         process: project.process
       });
     } else {
@@ -74,6 +76,7 @@ export default function Projects() {
         price: '',
         offer: '',
         link: '',
+        phone: '',
         process: 'building'
       });
     }
@@ -161,6 +164,7 @@ export default function Projects() {
                 <th>Price</th>
                 <th>Offer</th>
                 <th>Link</th>
+                <th>Phone</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -187,6 +191,7 @@ export default function Projects() {
                         </a>
                       ) : '-'}
                     </td>
+                    <td>{project.phone || '-'}</td>
                     <td>
                       <span className={`status-badge ${project.process}`}>
                         {project.process}
@@ -284,15 +289,28 @@ export default function Projects() {
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label>Project Link (Optional)</label>
-                  <input 
-                    type="url" 
-                    name="link" 
-                    value={formData.link} 
-                    onChange={handleInputChange} 
-                    placeholder="https://..."
-                  />
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Project Link (Optional)</label>
+                    <input 
+                      type="url" 
+                      name="link" 
+                      value={formData.link} 
+                      onChange={handleInputChange} 
+                      placeholder="https://..."
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label>Phone Number (Optional)</label>
+                    <input 
+                      type="tel" 
+                      name="phone" 
+                      value={formData.phone} 
+                      onChange={handleInputChange} 
+                      placeholder="+91..."
+                    />
+                  </div>
                 </div>
 
                 <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }}>

@@ -6,6 +6,7 @@ import Home from './pages/Home';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import ScrollToTop from './components/ScrollToTop';
+import RyzaChat from "./components/RyzaChat";
 import './App.css';
 
 // Admin imports
@@ -57,6 +58,7 @@ function App() {
               <Route path="trash" element={<Trash />} />
             </Route>
           </Routes>
+          <RyzaChat />
         </div>
       </Router>
     </AuthProvider>
