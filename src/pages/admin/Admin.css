@@ -229,6 +229,24 @@
   border: 1px solid rgba(33, 150, 243, 0.3);
 }
 
+.status-badge.active {
+  background: rgba(76, 175, 80, 0.1);
+  color: #4caf50;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.status-badge.suspended {
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
+  border: 1px solid rgba(255, 77, 79, 0.3);
+}
+
+.status-badge.delivered {
+  background: rgba(76, 175, 80, 0.1);
+  color: #4caf50;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
 /* Action Buttons */
 .action-btns {
   display: flex;
