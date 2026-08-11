@@ -1,7 +1,7 @@
 import React from 'react';
 import './Hero.css';
 import FluidGlassImage from './FluidGlassImage';
-import heroImg from '../assets/hero.png';
+import heroImg from '../assets/me_2_-removebg-preview.png';
 
 const Hero = () => {
   return (

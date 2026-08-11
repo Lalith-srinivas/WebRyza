@@ -7,7 +7,7 @@ const projects = [
     id: 1,
     title: 'Cafe / Restaurant Website',
     category: 'Demo',
-    desc: 'Starting from ₹2,999. Mobile-friendly design, WhatsApp integration, Menu & gallery showcase.',
+    desc: 'Modern restaurant website with a mobile-friendly experience, WhatsApp integration, menu showcase, and image gallery.',
     img: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=80',
     link: 'https://webryza-cafe-demo.vercel.app/'
   },
@@ -15,7 +15,7 @@ const projects = [
     id: 2,
     title: 'Bakery Website',
     category: 'Demo',
-    desc: 'Starting from ₹2,999. Mobile-friendly design, WhatsApp order integration, Product gallery & pricing.',
+    desc: 'Delightful bakery website featuring product galleries, WhatsApp ordering, and an inviting mobile-first design.',
     img: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?auto=format&fit=crop&w=800&q=80',
     link: 'https://webryza-bakery-demo.vercel.app/'
   },
@@ -23,7 +23,7 @@ const projects = [
     id: 3,
     title: 'Clinic Website',
     category: 'Demo',
-    desc: 'Starting from ₹3,999. Appointment booking form, Doctor profiles & services, WhatsApp integration.',
+    desc: 'Professional clinic website with appointment booking, doctor profiles, service listings, and WhatsApp integration.',
     img: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&w=800&q=80',
     link: 'https://webryza-clinic-demo.vercel.app/'
   },
@@ -31,7 +31,7 @@ const projects = [
     id: 4,
     title: 'Hotel Website',
     category: 'Demo',
-    desc: 'Starting from ₹6,999. Room showcase & booking, Photo gallery & virtual tour, Contact & location map.',
+    desc: 'Elegant hotel website with room showcases, photo gallery, virtual tour experience, and location map integration.',
     img: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80',
     link: 'https://webryza-hotel-demo.vercel.app/'
   },
@@ -39,7 +39,7 @@ const projects = [
     id: 5,
     title: 'Tuition Center Website',
     category: 'Demo',
-    desc: 'Starting from ₹2,999. Course & batch listings, Enquiry form & WhatsApp, Faculty showcase.',
+    desc: 'Comprehensive tuition center website with course listings, batch schedules, faculty showcase, and enquiry forms.',
     img: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&w=800&q=80',
     link: 'https://webryza-tuition-demo.vercel.app/'
   },
@@ -47,7 +47,7 @@ const projects = [
     id: 6,
     title: 'School Website',
     category: 'Demo',
-    desc: 'Starting from ₹4,999. Admissions & events page, Faculty & infrastructure, Gallery & achievements.',
+    desc: 'Feature-rich school website with admissions, events, faculty profiles, infrastructure showcase, and achievements gallery.',
     img: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80',
     link: 'https://webryza-school-demo.vercel.app/'
   },
@@ -55,9 +55,17 @@ const projects = [
     id: 7,
     title: 'Ecommerce Website',
     category: 'Demo',
-    desc: 'Starting from ₹14,999. Cart & checkout system, Payment gateway integration, Admin panel & analytics.',
+    desc: 'Full-featured ecommerce platform with cart & checkout, secure payment gateway integration, and admin analytics dashboard.',
     img: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=800&q=80',
     link: 'https://webryza-ecommerce-demo.vercel.app/'
+  },
+  {
+    id: 8,
+    title: 'Digital Wedding Invitation',
+    category: 'Demo',
+    desc: 'An elegant interactive digital wedding invitation experience designed to showcase the couple\'s story, event details, gallery, and celebration moments.',
+    img: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=800&q=80',
+    link: 'https://webwedding.vercel.app/'
   }
 ];
 

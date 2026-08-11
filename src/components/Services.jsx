@@ -1,28 +1,18 @@
 import React from 'react';
-import { LayoutTemplate, Code2, MonitorPlay, ShoppingCart, Rocket, LucideLineChart } from 'lucide-react';
+import { MonitorPlay, Code2, Rocket, LucideLineChart, Heart, Video } from 'lucide-react';
 import ScrollReveal from './ScrollReveal';
 import './Services.css';
 
 const servicesData = [
-  {
-    title: 'Web Design',
-    desc: 'Bespoke, high-end designs tailored to your brand identity, ensuring a lasting digital impression.',
-    icon: <LayoutTemplate size={32} />
-  },
-  {
-    title: 'Web Development',
-    desc: 'Scalable, lightning-fast, and secure websites built with modern technologies like React and Next.js.',
-    icon: <Code2 size={32} />
-  },
   {
     title: 'UI/UX Design',
     desc: 'Intuitive user experiences that engage visitors and guide them seamlessly toward conversion.',
     icon: <MonitorPlay size={32} />
   },
   {
-    title: 'E-commerce Solutions',
-    desc: 'Robust online stores optimized for sales, integrated seamlessly with secure payment gateways.',
-    icon: <ShoppingCart size={32} />
+    title: 'Web Development',
+    desc: 'Scalable, lightning-fast, and secure websites built with modern technologies like React and Next.js.',
+    icon: <Code2 size={32} />
   },
   {
     title: 'Landing Pages',
@@ -33,6 +23,16 @@ const servicesData = [
     title: 'Business Growth',
     desc: 'Helping your business grow with conversion-focused websites, WhatsApp integration, and strategies that turn visitors into real customers.',
     icon: <LucideLineChart size={32} />
+  },
+  {
+    title: 'Digital Wedding Invitation',
+    desc: 'Beautiful, personalized digital wedding invitations designed to share your special moments online with a premium experience.',
+    icon: <Heart size={32} />
+  },
+  {
+    title: 'AI Invitation Videos',
+    desc: 'AI-powered invitation videos crafted with engaging visuals, storytelling, and personalized details for memorable celebrations.',
+    icon: <Video size={32} />
   }
 ];
 
