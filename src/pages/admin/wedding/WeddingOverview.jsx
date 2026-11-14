@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion as Motion } from 'framer-motion';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import { 
   HeartHandshake, 
   FolderKanban, 
@@ -15,7 +15,8 @@ import {
   fetchAllWeddingCards, 
   fetchAllPartners, 
   recordWeddingPayment,
-  togglePartnerStatus
+  togglePartnerStatus,
+  deletePartner
 } from '../../../services/weddingService';
 import { 
   formatCurrency, 
@@ -39,6 +40,29 @@ export default function WeddingOverview() {
   const [selectedPartner, setSelectedPartner] = useState(null);
   const [qrPartner, setQrPartner] = useState(null);
   const [toast, setToast] = useState(null);
+  const [deleteConfirmPartner, setDeleteConfirmPartner] = useState(null);
+
+  const executeDeletePartner = async () => {
+    if (!deleteConfirmPartner) return;
+    try {
+      await deletePartner(deleteConfirmPartner.id);
+      setToast({
+        type: 'success',
+        message: `Partner "${deleteConfirmPartner.shopName}" deleted successfully.`
+      });
+      setDeleteConfirmPartner(null);
+      if (selectedPartner?.id === deleteConfirmPartner.id) {
+        setSelectedPartner(null);
+      }
+      await loadData();
+    } catch (err) {
+      console.error('Failed to delete partner:', err);
+      setToast({
+        type: 'error',
+        message: 'Failed to delete partner shop.'
+      });
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -488,6 +512,10 @@ export default function WeddingOverview() {
           await loadData();
           setSelectedPartner(null);
         }}
+        onDelete={(p) => {
+          setSelectedPartner(null);
+          setDeleteConfirmPartner(p);
+        }}
         onOpenQr={(p) => setQrPartner(p)}
         onCopyLink={(p) => {
           navigator.clipboard.writeText(p.registrationUrl);
@@ -505,6 +533,40 @@ export default function WeddingOverview() {
         onClose={() => setQrPartner(null)}
         onShowToast={(t) => setToast(t)}
       />
+
+      {/* Delete Partner Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirmPartner && (
+          <div className="modal-overlay">
+            <Motion.div
+              className="confirm-modal-content bg-glass"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <h3>Delete Partner Shop?</h3>
+              <p>
+                Are you sure you want to permanently delete <strong>{deleteConfirmPartner.shopName}</strong> ({deleteConfirmPartner.partnerCode})? 
+                Existing wedding projects and payment histories will be safely preserved.
+              </p>
+              <div className="confirm-modal-actions">
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setDeleteConfirmPartner(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={executeDeletePartner}
+                >
+                  Confirm Delete
+                </button>
+              </div>
+            </Motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

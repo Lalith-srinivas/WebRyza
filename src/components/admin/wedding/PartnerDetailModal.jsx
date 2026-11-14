@@ -10,7 +10,8 @@ import {
   Edit2, 
   Power, 
   FolderKanban, 
-  IndianRupee
+  IndianRupee,
+  Trash2
 } from 'lucide-react';
 import { formatCurrency, formatWeddingDate } from '../../../utils/weddingCommission';
 
@@ -21,6 +22,7 @@ export default function PartnerDetailModal({
   onClose,
   onEdit,
   onToggleStatus,
+  onDelete,
   onOpenQr,
   onCopyLink,
   onSelectProject
@@ -80,11 +82,19 @@ export default function PartnerDetailModal({
             <Edit2 size={16} style={{ marginRight: '0.4rem' }} /> Edit Details
           </button>
           <button
-            className={`btn btn-sm ${partner.isActive !== false ? 'btn-danger' : 'btn-primary'}`}
+            className={`btn btn-sm ${partner.isActive !== false ? 'btn-secondary' : 'btn-primary'}`}
             onClick={() => onToggleStatus(partner.id, !(partner.isActive !== false))}
           >
             <Power size={16} style={{ marginRight: '0.4rem' }} />
             {partner.isActive !== false ? 'Deactivate Partner' : 'Activate Partner'}
+          </button>
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={() => onDelete(partner)}
+            title="Permanently Delete Partner"
+          >
+            <Trash2 size={16} style={{ marginRight: '0.4rem' }} />
+            Delete Partner
           </button>
         </div>
 

@@ -103,6 +103,35 @@ export async function togglePartnerStatus(partnerId, isActive) {
 }
 
 /**
+ * Permanently deletes a partner shop.
+ * Preserves all linked wedding cards and payment histories by converting their source to direct.
+ */
+export async function deletePartner(partnerId) {
+  const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
+  const partnerSnap = await getDoc(partnerRef);
+  const shopName = partnerSnap.exists() ? (partnerSnap.data().shopName || 'Deleted Partner') : 'Deleted Partner';
+
+  // Unlink associated cards to preserve project and payment data
+  const cardsQuery = query(collection(db, CARDS_COLLECTION), where('partnerId', '==', partnerId));
+  const cardsSnap = await getDocs(cardsQuery);
+  if (!cardsSnap.empty) {
+    const batch = writeBatch(db);
+    cardsSnap.forEach(cardDoc => {
+      batch.update(cardDoc.ref, {
+        partnerId: '',
+        partnerShopName: `${shopName} (Former Partner)`,
+        source: 'direct',
+        updatedAt: serverTimestamp()
+      });
+    });
+    await batch.commit();
+  }
+
+  // Delete partner document
+  await deleteDoc(partnerRef);
+}
+
+/**
  * Fetches all partners
  */
 export async function fetchAllPartners() {

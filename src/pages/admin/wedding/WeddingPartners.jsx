@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import { 
   Plus, 
   Search, 
@@ -10,14 +11,16 @@ import {
   Edit2, 
   Power, 
   Eye, 
-  Check
+  Check,
+  Trash2
 } from 'lucide-react';
 import { 
   fetchAllPartners, 
   fetchAllWeddingCards, 
   createPartner, 
   updatePartner, 
-  togglePartnerStatus 
+  togglePartnerStatus,
+  deletePartner
 } from '../../../services/weddingService';
 import { formatCurrency } from '../../../utils/weddingCommission';
 import PartnerModal from '../../../components/admin/wedding/PartnerModal';
@@ -43,6 +46,7 @@ export default function WeddingPartners() {
   const [selectedProject, setSelectedProject] = useState(null);
   const [toast, setToast] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [deleteConfirmPartner, setDeleteConfirmPartner] = useState(null);
 
   useEffect(() => {
     loadData();
@@ -110,6 +114,28 @@ export default function WeddingPartners() {
       message: `Copied link for ${partner.shopName}!`
     });
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const executeDeletePartner = async () => {
+    if (!deleteConfirmPartner) return;
+    try {
+      await deletePartner(deleteConfirmPartner.id);
+      setToast({
+        type: 'success',
+        message: `Partner "${deleteConfirmPartner.shopName}" deleted successfully.`
+      });
+      setDeleteConfirmPartner(null);
+      if (detailPartner?.id === deleteConfirmPartner.id) {
+        setDetailPartner(null);
+      }
+      await loadData();
+    } catch (err) {
+      console.error('Failed to delete partner:', err);
+      setToast({
+        type: 'error',
+        message: 'Failed to delete partner shop.'
+      });
+    }
   };
 
   const filteredPartners = partners.filter((p) => {
@@ -341,6 +367,14 @@ export default function WeddingPartners() {
                   >
                     <Power size={16} />
                   </button>
+
+                  <button
+                    className="icon-btn delete"
+                    onClick={() => setDeleteConfirmPartner(partner)}
+                    title="Delete Partner Shop"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </div>
             );
@@ -380,6 +414,9 @@ export default function WeddingPartners() {
           setIsAddEditModalOpen(true);
         }}
         onToggleStatus={handleToggleStatus}
+        onDelete={(partnerToDelete) => {
+          setDeleteConfirmPartner(partnerToDelete);
+        }}
         onOpenQr={(p) => setQrPartner(p)}
         onCopyLink={handleCopyLink}
         onSelectProject={(proj) => setSelectedProject(proj)}
@@ -393,6 +430,40 @@ export default function WeddingPartners() {
         onShowToast={(t) => setToast(t)}
         onProjectUpdated={loadData}
       />
+
+      {/* Delete Partner Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirmPartner && (
+          <div className="modal-overlay">
+            <Motion.div
+              className="confirm-modal-content bg-glass"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <h3>Delete Partner Shop?</h3>
+              <p>
+                Are you sure you want to permanently delete <strong>{deleteConfirmPartner.shopName}</strong> ({deleteConfirmPartner.partnerCode})? 
+                Existing wedding projects and payment histories will be safely preserved.
+              </p>
+              <div className="confirm-modal-actions">
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setDeleteConfirmPartner(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-danger"
+                  onClick={executeDeletePartner}
+                >
+                  Confirm Delete
+                </button>
+              </div>
+            </Motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
