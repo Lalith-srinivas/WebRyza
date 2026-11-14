@@ -1,0 +1,66 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // ==================================================
+    // 1. WebRyza Existing Projects Collection
+    // ==================================================
+    match /projects/{projectId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // ==================================================
+    // 2. Wedding Partners Collection
+    // ==================================================
+    match /wedding_partners/{partnerId} {
+      // Authenticated Admin has full access
+      allow read, write: if isAuthenticated();
+
+      // Public registration form can read active partner info to display shop name
+      // and verify active status (cannot list all partners or write)
+      allow get: if resource.data.isActive == true;
+    }
+
+    // ==================================================
+    // 3. Wedding Cards Collection
+    // ==================================================
+    match /wedding_cards/{cardId} {
+      // Authenticated Admin has full control
+      allow read, write: if isAuthenticated();
+
+      // Secure public submission from cards.webryza.in registration form:
+      // Validates required fields, enforces minimum ₹1,500 charge,
+      // and guarantees initial status is 'confirmed', with 0 payments received.
+      allow create: if 
+        request.resource.data.amountCharged is number &&
+        request.resource.data.amountCharged >= 1500 &&
+        request.resource.data.brideName is string &&
+        request.resource.data.brideName.size() > 0 &&
+        request.resource.data.groomName is string &&
+        request.resource.data.groomName.size() > 0 &&
+        request.resource.data.phone is string &&
+        request.resource.data.phone.size() > 0 &&
+        request.resource.data.status == 'confirmed' &&
+        request.resource.data.paymentStatus == 'pending' &&
+        request.resource.data.amountReceivedByWebryza == 0 &&
+        (
+          (request.resource.data.amountCharged < 2000 && request.resource.data.webryzaShare == 1000) ||
+          (request.resource.data.amountCharged >= 2000 && request.resource.data.webryzaShare == 1500)
+        );
+    }
+
+    // ==================================================
+    // 4. Wedding Payments Collection
+    // ==================================================
+    match /wedding_payments/{paymentId} {
+      // Only authenticated admin can view, record, or delete payments
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

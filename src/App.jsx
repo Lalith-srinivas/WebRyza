@@ -16,6 +16,10 @@ import Login from './pages/admin/Login';
 import Dashboard from './pages/admin/Dashboard';
 import Projects from './pages/admin/Projects';
 import Trash from './pages/admin/Trash';
+import WeddingCardsLayout from './pages/admin/wedding/WeddingCardsLayout';
+import WeddingOverview from './pages/admin/wedding/WeddingOverview';
+import WeddingProjects from './pages/admin/wedding/WeddingProjects';
+import WeddingPartners from './pages/admin/wedding/WeddingPartners';
 
 // Public Layout
 function PublicLayout() {
@@ -54,6 +58,11 @@ function App() {
             >
               <Route index element={<Dashboard />} />
               <Route path="projects" element={<Projects />} />
+              <Route path="wedding-cards" element={<WeddingCardsLayout />}>
+                <Route index element={<WeddingOverview />} />
+                <Route path="projects" element={<WeddingProjects />} />
+                <Route path="partners" element={<WeddingPartners />} />
+              </Route>
               <Route path="trash" element={<Trash />} />
             </Route>
           </Routes>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, FolderKanban, Trash2, Home, LogOut } from 'lucide-react';
+import { LayoutDashboard, FolderKanban, Trash2, Home, LogOut, CalendarHeart } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import './Admin.css';
 
@@ -45,6 +45,14 @@ export default function AdminLayout() {
           >
             <FolderKanban size={20} />
             <span>Projects</span>
+          </NavLink>
+
+          <NavLink 
+            to="/webryza-admin/wedding-cards" 
+            className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
+          >
+            <CalendarHeart size={20} />
+            <span>Wedding Cards</span>
           </NavLink>
           
           <NavLink 
