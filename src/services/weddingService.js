@@ -25,6 +25,42 @@ export const USERNAMES_COLLECTION = 'partner_usernames';
 const BASE_REGISTRATION_URL = 'https://cards.webryza.in/?ref=';
 
 /**
+ * Normalizes error messages from Cloud Functions callables
+ */
+function formatCallableError(err, fallbackMessage) {
+  console.error(fallbackMessage, err);
+  if (err?.code === 'functions/permission-denied') {
+    return new Error('Access denied. Only authorized WebRyza administrators can perform this action.');
+  }
+  if (err?.code === 'functions/unauthenticated') {
+    return new Error('You must be logged in as an administrator to perform this action.');
+  }
+  if (err?.code === 'functions/already-exists') {
+    return new Error(err.message || 'This username or ID is already taken.');
+  }
+  if (err?.code === 'functions/invalid-argument') {
+    return new Error(err.message || 'Invalid input provided.');
+  }
+  if (err?.code === 'functions/not-found') {
+    return new Error(err.message || 'Record not found.');
+  }
+  
+  const errMsg = String(err?.message || '').toLowerCase();
+  if (
+    errMsg === 'internal' ||
+    err?.code === 'functions/internal' ||
+    err?.code === 'functions/unavailable' ||
+    errMsg.includes('failed to fetch') ||
+    errMsg.includes('cors')
+  ) {
+    return new Error(
+      'Cloud Function request blocked or unavailable at us-central1. Ensure backend functions are deployed (firebase deploy --only functions).'
+    );
+  }
+  return new Error(err?.message || fallbackMessage);
+}
+
+/**
  * Generates the next sequential Partner ID (e.g., SHOP001, SHOP002)
  */
 export async function generateNextPartnerCode() {
@@ -51,6 +87,7 @@ export async function generateNextPartnerCode() {
  * Creates a new partner shop securely.
  * Uses trusted Cloud Function createPartnerAccount to create the Firebase Auth login,
  * connect the UID, assign role: 'partner', and generate registration URL & QR.
+ * Fails safely without creating partial records if the backend function fails.
  */
 export async function createPartner({
   shopName,
@@ -64,7 +101,6 @@ export async function createPartner({
 }) {
   const finalCode = (partnerCode && partnerCode.trim()) ? partnerCode.trim().toUpperCase() : await generateNextPartnerCode();
   const cleanUsername = String(username || '').toLowerCase().trim();
-  const registrationUrl = `${BASE_REGISTRATION_URL}${finalCode}`;
 
   if (!cleanUsername) {
     throw new Error('Username is required.');
@@ -73,7 +109,6 @@ export async function createPartner({
     throw new Error('Password must be at least 6 characters.');
   }
 
-  // Attempt secure account creation via Cloud Function
   try {
     const createPartnerFn = httpsCallable(functions, 'createPartnerAccount');
     const result = await createPartnerFn({
@@ -99,107 +134,38 @@ export async function createPartner({
       authUid: result.data?.authUid || '',
       role: 'partner',
       isActive: true,
-      registrationUrl
+      registrationUrl: result.data?.registrationUrl || `${BASE_REGISTRATION_URL}${finalCode}`
     };
-  } catch (cloudErr) {
-    console.warn('Cloud Function createPartnerAccount unavailable or failed. Using direct Firestore transaction:', cloudErr);
-    
-    // Check if username is taken in partner_usernames
-    const usernameSnap = await getDoc(doc(db, USERNAMES_COLLECTION, cleanUsername));
-    if (usernameSnap.exists()) {
-      throw new Error(`The username "${cleanUsername}" is already taken. Please choose another username.`);
-    }
-
-    // Direct Firestore creation
-    const partnerData = {
-      partnerCode: finalCode,
-      shopName: shopName.trim(),
-      ownerName: ownerName.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-      address: address.trim(),
-      username: cleanUsername,
-      authUid: '',
-      role: 'partner',
-      isActive: true,
-      registrationUrl,
-      totalProjects: 0,
-      totalAmountCharged: 0,
-      totalAmountDue: 0,
-      totalAmountPaid: 0,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    };
-
-    const batch = writeBatch(db);
-    batch.set(doc(db, PARTNERS_COLLECTION, finalCode), partnerData);
-    batch.set(doc(db, USERNAMES_COLLECTION, cleanUsername), {
-      username: cleanUsername,
-      partnerCode: finalCode,
-      partnerId: finalCode,
-      authUid: '',
-      internalEmail: `${cleanUsername}@partner.webryza.in`,
-      createdAt: serverTimestamp()
-    });
-
-    await batch.commit();
-
-    return { id: finalCode, ...partnerData };
+  } catch (err) {
+    throw formatCallableError(err, 'Failed to create partner account.');
   }
 }
 
 /**
- * Changes a partner's username using Cloud Function changePartnerUsername
+ * Changes a partner's username using Cloud Function changePartnerUsername.
+ * Safely updates Authentication account, releases old username, and claims new username atomically.
  */
 export async function changePartnerUsername(partnerId, newUsername) {
-  const cleanNew = String(newUsername).toLowerCase().trim();
+  const cleanNew = String(newUsername || '').toLowerCase().trim();
   if (!cleanNew || cleanNew.length < 3) {
     throw new Error('Username must be at least 3 characters long.');
   }
 
   try {
     const changeUsernameFn = httpsCallable(functions, 'changePartnerUsername');
-    await changeUsernameFn({
+    const result = await changeUsernameFn({
       partnerId,
       newUsername: cleanNew
     });
-  } catch (cloudErr) {
-    console.warn('Cloud Function changePartnerUsername unavailable, updating Firestore mapping directly:', cloudErr);
-    
-    const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
-    const partnerSnap = await getDoc(partnerRef);
-    if (!partnerSnap.exists()) throw new Error('Partner not found.');
-
-    const oldUsername = (partnerSnap.data().username || '').toLowerCase().trim();
-
-    // Check if new username exists
-    const newUsernameSnap = await getDoc(doc(db, USERNAMES_COLLECTION, cleanNew));
-    if (newUsernameSnap.exists()) {
-      throw new Error(`Username "${cleanNew}" is already taken.`);
-    }
-
-    const batch = writeBatch(db);
-    if (oldUsername) {
-      batch.delete(doc(db, USERNAMES_COLLECTION, oldUsername));
-    }
-    batch.set(doc(db, USERNAMES_COLLECTION, cleanNew), {
-      username: cleanNew,
-      partnerCode: partnerSnap.data().partnerCode || partnerId,
-      partnerId: partnerId,
-      internalEmail: `${cleanNew}@partner.webryza.in`,
-      updatedAt: serverTimestamp()
-    });
-    batch.update(partnerRef, {
-      username: cleanNew,
-      updatedAt: serverTimestamp()
-    });
-
-    await batch.commit();
+    return result.data;
+  } catch (err) {
+    throw formatCallableError(err, 'Failed to update partner username.');
   }
 }
 
 /**
- * Resets a partner's password using Cloud Function resetPartnerPassword
+ * Resets a partner's password using trusted Cloud Function resetPartnerPassword.
+ * Updates the existing Firebase Authentication account without creating duplicates.
  */
 export async function resetPartnerPassword(partnerId, newPassword) {
   if (!newPassword || String(newPassword).length < 6) {
@@ -208,13 +174,13 @@ export async function resetPartnerPassword(partnerId, newPassword) {
 
   try {
     const resetPasswordFn = httpsCallable(functions, 'resetPartnerPassword');
-    await resetPasswordFn({
+    const result = await resetPasswordFn({
       partnerId,
       newPassword: String(newPassword)
     });
-  } catch (cloudErr) {
-    console.error('Failed to reset password via Cloud Function:', cloudErr);
-    throw new Error(cloudErr.message || 'Failed to reset password. Please ensure Cloud Functions are deployed.');
+    return result.data;
+  } catch (err) {
+    throw formatCallableError(err, 'Failed to reset partner password.');
   }
 }
 
@@ -236,52 +202,35 @@ export async function updatePartner(partnerId, updateFields) {
 
 /**
  * Toggles partner active state (activation / deactivation).
- * Uses Cloud Function togglePartnerStatus to enable/disable Firebase Auth login,
- * and updates Firestore.
+ * Uses Cloud Function togglePartnerStatus to enable/disable Firebase Auth login and update Firestore.
  */
 export async function togglePartnerStatus(partnerId, isActive) {
-  const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
-  
-  // Try Cloud Function to update Firebase Auth user state
+  if (!partnerId) throw new Error('Partner ID is required.');
   try {
     const toggleStatusFn = httpsCallable(functions, 'togglePartnerStatus');
-    await toggleStatusFn({ partnerId, isActive });
+    const result = await toggleStatusFn({ partnerId, isActive });
+    return result.data;
   } catch (err) {
-    console.warn('Cloud Function togglePartnerStatus unavailable, updating Firestore directly:', err);
-    await updateDoc(partnerRef, {
-      isActive,
-      updatedAt: serverTimestamp()
-    });
+    throw formatCallableError(err, 'Failed to toggle partner status.');
   }
 }
 
 /**
- * Permanently deletes a partner shop.
- * Preserves all linked wedding cards and payment histories by converting their source to direct.
+ * Permanently deletes a partner shop using trusted Cloud Function deletePartnerAccount.
+ * 1. Preserves all linked wedding cards and payments (unlinks partner, sets Former Partner)
+ * 2. Deletes the associated Firebase Authentication user account
+ * 3. Releases the username mapping so it can be reused immediately
+ * 4. Deletes the partner document from Firestore
  */
 export async function deletePartner(partnerId) {
-  const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
-  const partnerSnap = await getDoc(partnerRef);
-  const shopName = partnerSnap.exists() ? (partnerSnap.data().shopName || 'Deleted Partner') : 'Deleted Partner';
-
-  // Unlink associated cards to preserve project and payment data
-  const cardsQuery = query(collection(db, CARDS_COLLECTION), where('partnerId', '==', partnerId));
-  const cardsSnap = await getDocs(cardsQuery);
-  if (!cardsSnap.empty) {
-    const batch = writeBatch(db);
-    cardsSnap.forEach(cardDoc => {
-      batch.update(cardDoc.ref, {
-        partnerId: '',
-        partnerShopName: `${shopName} (Former Partner)`,
-        source: 'direct',
-        updatedAt: serverTimestamp()
-      });
-    });
-    await batch.commit();
+  if (!partnerId) throw new Error('Partner ID is required.');
+  try {
+    const deleteFn = httpsCallable(functions, 'deletePartnerAccount');
+    const result = await deleteFn({ partnerId });
+    return result.data;
+  } catch (err) {
+    throw formatCallableError(err, 'Failed to delete partner account.');
   }
-
-  // Delete partner document
-  await deleteDoc(partnerRef);
 }
 
 /**

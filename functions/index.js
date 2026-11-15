@@ -1,31 +1,75 @@
-const functions = require('firebase-functions');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
 const db = admin.firestore();
 
 /**
- * Validates a username string (alphanumeric, dashes, underscores, 3-30 chars)
+ * Production and staging origins allowed to call WebRyza backend functions.
+ * Unrestricted origins are strictly forbidden in production.
  */
-function isValidUsername(username) {
-  if (!username || typeof username !== 'string') return false;
-  const regex = /^[a-zA-Z0-9_-]{3,30}$/;
-  return regex.test(username.trim());
+const ALLOWED_ORIGINS = [
+  'https://www.webryza.in',
+  'https://webryza.in',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173'
+];
+
+const FUNCTION_OPTS = {
+  cors: ALLOWED_ORIGINS,
+  region: 'us-central1'
+};
+
+/**
+ * Validates that the caller is an authenticated WebRyza administrator.
+ * Rejects unauthenticated callers and users carrying the partner role claim.
+ */
+function verifyAdmin(request) {
+  if (!request.auth) {
+    throw new HttpsError(
+      'unauthenticated',
+      'Authentication required. Please sign in to the WebRyza Admin Panel.'
+    );
+  }
+
+  // Partners are not permitted to execute administrative backend functions
+  if (request.auth.token && request.auth.token.role === 'partner') {
+    throw new HttpsError(
+      'permission-denied',
+      'Unauthorized. Only WebRyza administrators can perform this action.'
+    );
+  }
+}
+
+/**
+ * Normalizes username to lowercase and trims whitespace
+ */
+function normalizeUsername(username) {
+  if (!username || typeof username !== 'string') return '';
+  return username.toLowerCase().trim();
+}
+
+/**
+ * Validates username string (alphanumeric, dashes, underscores, 3-30 chars)
+ */
+function validateUsernameFormat(username) {
+  const regex = /^[a-z0-9_-]{3,30}$/;
+  return regex.test(username);
 }
 
 /**
  * Callable Function: createPartnerAccount
- * Securely creates a partner's Firebase Auth account, assigns the partner role,
- * generates registration URL & QR mapping, and connects the Auth UID to wedding_partners.
+ * Securely creates a partner account:
+ * 1. Verifies admin authorization
+ * 2. Normalizes username and checks uniqueness atomically in partner_usernames
+ * 3. Creates the Firebase Authentication user with role: 'partner'
+ * 4. Creates the partner record in wedding_partners and maps authUid
+ * 5. Creates the username mapping in partner_usernames
+ * 6. Safely rolls back if any step fails
  */
-exports.createPartnerAccount = functions.https.onCall(async (data, context) => {
-  // 1. Verify caller authentication
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'Only authenticated WebRyza administrators can create partner accounts.'
-    );
-  }
+exports.createPartnerAccount = onCall(FUNCTION_OPTS, async (request) => {
+  verifyAdmin(request);
 
   const {
     shopName,
@@ -36,59 +80,67 @@ exports.createPartnerAccount = functions.https.onCall(async (data, context) => {
     partnerCode,
     username,
     password
-  } = data || {};
+  } = request.data || {};
 
-  // 2. Validate input fields
   if (!shopName || !ownerName || !phone || !partnerCode || !username || !password) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       'invalid-argument',
       'Shop Name, Owner Name, Phone, Partner ID, Username, and Password are required.'
     );
   }
 
-  const cleanUsername = String(username).toLowerCase().trim();
+  const cleanUsername = normalizeUsername(username);
   const cleanPartnerCode = String(partnerCode).trim().toUpperCase();
 
-  if (!isValidUsername(cleanUsername)) {
-    throw new functions.https.HttpsError(
+  if (!validateUsernameFormat(cleanUsername)) {
+    throw new HttpsError(
       'invalid-argument',
-      'Username must be 3-30 characters long and can only contain letters, numbers, hyphens, and underscores.'
+      'Username must be 3-30 characters long and can only contain lowercase letters, numbers, hyphens, and underscores.'
     );
   }
 
   if (String(password).length < 6) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       'invalid-argument',
       'Password must be at least 6 characters long.'
     );
   }
 
-  // 3. Check if username is already taken
   const usernameDocRef = db.collection('partner_usernames').doc(cleanUsername);
-  const usernameSnap = await usernameDocRef.get();
-  if (usernameSnap.exists) {
-    throw new functions.https.HttpsError(
-      'already-exists',
-      `The username "${cleanUsername}" is already taken. Please choose another username.`
-    );
-  }
-
-  // 4. Check if partnerCode already exists
   const partnerDocRef = db.collection('wedding_partners').doc(cleanPartnerCode);
-  const partnerSnap = await partnerDocRef.get();
-  if (partnerSnap.exists) {
-    throw new functions.https.HttpsError(
-      'already-exists',
-      `Partner ID "${cleanPartnerCode}" already exists. Please choose or generate another ID.`
-    );
-  }
 
-  // 5. Internal email mapping for Firebase Auth
+  // 1. Atomic reservation of username and verification of Partner ID
+  await db.runTransaction(async (transaction) => {
+    const userDoc = await transaction.get(usernameDocRef);
+    if (userDoc.exists) {
+      throw new HttpsError(
+        'already-exists',
+        `The username "${cleanUsername}" is already taken. Please choose another username.`
+      );
+    }
+
+    const partnerDoc = await transaction.get(partnerDocRef);
+    if (partnerDoc.exists) {
+      throw new HttpsError(
+        'already-exists',
+        `Partner ID "${cleanPartnerCode}" already exists. Please choose or generate another ID.`
+      );
+    }
+
+    // Temporarily reserve username mapping to prevent simultaneous race conditions
+    transaction.set(usernameDocRef, {
+      reserved: true,
+      username: cleanUsername,
+      partnerCode: cleanPartnerCode,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+  });
+
   const internalEmail = `${cleanUsername}@partner.webryza.in`;
-
   let userRecord;
+
+  // 2. Create Firebase Authentication User
   try {
-    // Create Firebase Authentication user
     userRecord = await admin.auth().createUser({
       email: internalEmail,
       password: String(password),
@@ -96,27 +148,39 @@ exports.createPartnerAccount = functions.https.onCall(async (data, context) => {
       disabled: false
     });
   } catch (authError) {
+    // Release reserved username mapping if Auth creation fails
+    await usernameDocRef.delete().catch(() => {});
+
     console.error('Error creating Firebase Auth user:', authError);
     if (authError.code === 'auth/email-already-exists') {
-      throw new functions.https.HttpsError(
+      throw new HttpsError(
         'already-exists',
-        `An account with username "${cleanUsername}" already exists in Firebase Auth.`
+        `An authentication account with username "${cleanUsername}" already exists.`
       );
     }
-    throw new functions.https.HttpsError('internal', authError.message || 'Failed to create login account.');
+    throw new HttpsError('internal', authError.message || 'Failed to create Firebase Authentication account.');
   }
 
+  // 3. Assign Custom Claims: role 'partner'
   try {
-    // 6. Assign Custom Claims: role 'partner'
     await admin.auth().setCustomUserClaims(userRecord.uid, {
       role: 'partner',
       partnerCode: cleanPartnerCode,
       partnerId: cleanPartnerCode
     });
+  } catch (claimErr) {
+    console.error('Error setting custom claims:', claimErr);
+    // Cleanup Auth user and reserved username
+    await admin.auth().deleteUser(userRecord.uid).catch(() => {});
+    await usernameDocRef.delete().catch(() => {});
+    throw new HttpsError('internal', 'Failed to configure partner permissions.');
+  }
 
+  // 4. Save Partner document and finalize username mapping in Firestore
+  try {
     const registrationUrl = `https://cards.webryza.in/?ref=${cleanPartnerCode}`;
+    const batch = db.batch();
 
-    // 7. Write to wedding_partners (NEVER store password in plaintext)
     const partnerData = {
       partnerCode: cleanPartnerCode,
       shopName: String(shopName).trim(),
@@ -136,17 +200,19 @@ exports.createPartnerAccount = functions.https.onCall(async (data, context) => {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
-    await partnerDocRef.set(partnerData);
+    batch.set(partnerDocRef, partnerData);
 
-    // 8. Write to partner_usernames lookup mapping
-    await usernameDocRef.set({
+    batch.set(usernameDocRef, {
       username: cleanUsername,
       partnerCode: cleanPartnerCode,
       partnerId: cleanPartnerCode,
       authUid: userRecord.uid,
       internalEmail,
-      createdAt: admin.firestore.FieldValue.serverTimestamp()
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
+
+    await batch.commit();
 
     return {
       success: true,
@@ -156,74 +222,85 @@ exports.createPartnerAccount = functions.https.onCall(async (data, context) => {
       registrationUrl
     };
   } catch (firestoreError) {
-    console.error('Error saving partner to Firestore:', firestoreError);
-    // Cleanup Auth user if Firestore write fails to prevent orphaned auth accounts
+    console.error('Error saving partner to Firestore, rolling back:', firestoreError);
+    // Clean up created Auth user and username mapping to prevent orphaned records
     await admin.auth().deleteUser(userRecord.uid).catch(() => {});
-    throw new functions.https.HttpsError('internal', 'Failed to store partner record in database.');
+    await usernameDocRef.delete().catch(() => {});
+    throw new HttpsError('internal', 'Failed to save partner record to Firestore.');
   }
 });
 
 /**
  * Callable Function: changePartnerUsername
- * Allows the admin to change a partner's username, updating their login email and mapping.
+ * Safely changes a partner's username:
+ * 1. Verifies admin authorization
+ * 2. Validates new username format and ensures uniqueness
+ * 3. Updates Firebase Authentication internal email
+ * 4. Atomically transfers the username mapping in partner_usernames
  */
-exports.changePartnerUsername = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'Only WebRyza administrators can change partner usernames.'
-    );
-  }
+exports.changePartnerUsername = onCall(FUNCTION_OPTS, async (request) => {
+  verifyAdmin(request);
 
-  const { partnerId, newUsername } = data || {};
+  const { partnerId, newUsername } = request.data || {};
   if (!partnerId || !newUsername) {
-    throw new functions.https.HttpsError('invalid-argument', 'Partner ID and new username are required.');
+    throw new HttpsError('invalid-argument', 'Partner ID and new username are required.');
   }
 
-  const cleanNew = String(newUsername).toLowerCase().trim();
-  if (!isValidUsername(cleanNew)) {
-    throw new functions.https.HttpsError(
+  const cleanNew = normalizeUsername(newUsername);
+  if (!validateUsernameFormat(cleanNew)) {
+    throw new HttpsError(
       'invalid-argument',
-      'New username must be 3-30 characters long and can only contain letters, numbers, hyphens, and underscores.'
+      'Username must be 3-30 characters long and can only contain lowercase letters, numbers, hyphens, and underscores.'
     );
   }
 
   const partnerDocRef = db.collection('wedding_partners').doc(String(partnerId).trim());
   const partnerSnap = await partnerDocRef.get();
   if (!partnerSnap.exists) {
-    throw new functions.https.HttpsError('not-found', 'Partner document not found.');
+    throw new HttpsError('not-found', 'Partner document not found.');
   }
 
   const partnerData = partnerSnap.data();
-  const oldUsername = (partnerData.username || '').toLowerCase().trim();
+  const oldUsername = normalizeUsername(partnerData.username);
+
   if (oldUsername === cleanNew) {
-    return { success: true, message: 'Username is unchanged.' };
+    return { success: true, message: 'Username is already set to this value.' };
   }
 
-  // Check if new username document exists
   const newUsernameDocRef = db.collection('partner_usernames').doc(cleanNew);
-  const newSnap = await newUsernameDocRef.get();
-  if (newSnap.exists) {
-    throw new functions.https.HttpsError(
-      'already-exists',
-      `The username "${cleanNew}" is already in use by another partner.`
-    );
-  }
+
+  // Check and reserve new username atomically
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(newUsernameDocRef);
+    if (snap.exists) {
+      throw new HttpsError('already-exists', `The username "${cleanNew}" is already taken.`);
+    }
+    transaction.set(newUsernameDocRef, {
+      reserved: true,
+      username: cleanNew,
+      partnerId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+  });
 
   const authUid = partnerData.authUid;
   const newInternalEmail = `${cleanNew}@partner.webryza.in`;
 
-  // Update Firebase Auth user email if Auth account exists
+  // Update Auth user email if Auth account exists
   if (authUid) {
     try {
-      await admin.auth().updateUser(authUid, { email: newInternalEmail });
+      await admin.auth().updateUser(authUid, {
+        email: newInternalEmail
+      });
     } catch (err) {
       console.error('Failed to update Auth user email:', err);
-      throw new functions.https.HttpsError('internal', 'Failed to update login account in Firebase Authentication.');
+      // Release reservation
+      await newUsernameDocRef.delete().catch(() => {});
+      throw new HttpsError('internal', 'Failed to update login account in Firebase Authentication.');
     }
   }
 
-  // Batch update Firestore
+  // Atomically update Firestore records
   const batch = db.batch();
   if (oldUsername) {
     batch.delete(db.collection('partner_usernames').doc(oldUsername));
@@ -248,60 +325,65 @@ exports.changePartnerUsername = functions.https.onCall(async (data, context) => 
 
 /**
  * Callable Function: resetPartnerPassword
- * Allows the admin to set a new password for the partner in Firebase Authentication.
+ * Resets a partner's password:
+ * 1. Verifies admin authorization
+ * 2. Finds the existing Firebase Authentication account
+ * 3. Updates the existing account's password (never creates a duplicate account)
+ * 4. Preserves all partner projects and payment records
  */
-exports.resetPartnerPassword = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'Only WebRyza administrators can reset partner passwords.'
-    );
-  }
+exports.resetPartnerPassword = onCall(FUNCTION_OPTS, async (request) => {
+  verifyAdmin(request);
 
-  const { partnerId, newPassword } = data || {};
+  const { partnerId, newPassword } = request.data || {};
   if (!partnerId || !newPassword) {
-    throw new functions.https.HttpsError('invalid-argument', 'Partner ID and new password are required.');
+    throw new HttpsError('invalid-argument', 'Partner ID and new password are required.');
   }
 
   if (String(newPassword).length < 6) {
-    throw new functions.https.HttpsError('invalid-argument', 'New password must be at least 6 characters long.');
+    throw new HttpsError('invalid-argument', 'New password must be at least 6 characters long.');
   }
 
   const partnerDocRef = db.collection('wedding_partners').doc(String(partnerId).trim());
   const partnerSnap = await partnerDocRef.get();
   if (!partnerSnap.exists) {
-    throw new functions.https.HttpsError('not-found', 'Partner document not found.');
+    throw new HttpsError('not-found', 'Partner document not found.');
   }
 
   const partnerData = partnerSnap.data();
   let authUid = partnerData.authUid;
+  const username = normalizeUsername(partnerData.username || partnerData.partnerCode);
+  const internalEmail = `${username}@partner.webryza.in`;
 
-  // If partner does not have an Auth UID yet (legacy record), create one now
+  // Locate the existing Authentication account
   if (!authUid) {
-    const username = partnerData.username || partnerData.partnerCode.toLowerCase();
-    const internalEmail = `${username}@partner.webryza.in`;
-    const newUser = await admin.auth().createUser({
-      email: internalEmail,
-      password: String(newPassword),
-      displayName: partnerData.shopName,
-      disabled: partnerData.isActive === false
-    });
-    authUid = newUser.uid;
-    await admin.auth().setCustomUserClaims(authUid, {
-      role: 'partner',
-      partnerCode: partnerData.partnerCode || partnerId,
-      partnerId: partnerId
-    });
-    await partnerDocRef.update({
-      authUid,
-      username,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
-  } else {
-    // Update password in Firebase Auth (never stored in Firestore!)
+    try {
+      const existingUser = await admin.auth().getUserByEmail(internalEmail);
+      authUid = existingUser.uid;
+      // Connect authUid back to partner document
+      await partnerDocRef.update({
+        authUid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } catch (notFoundErr) {
+      console.error('Authentication user not found for password reset:', notFoundErr);
+      throw new HttpsError(
+        'not-found',
+        `No Firebase Authentication account found for username "${username}". Please recreate the partner account.`
+      );
+    }
+  }
+
+  // Update existing user password via Admin SDK
+  try {
     await admin.auth().updateUser(authUid, {
       password: String(newPassword)
     });
+  } catch (updateErr) {
+    console.error('Error updating password in Firebase Auth:', updateErr);
+    if (updateErr.code === 'auth/user-not-found') {
+      throw new HttpsError('not-found', 'The login account for this partner was not found in Firebase Authentication.');
+    }
+    throw new HttpsError('internal', updateErr.message || 'Failed to update partner password.');
   }
 
   return { success: true, message: 'Password has been successfully updated.' };
@@ -311,36 +393,30 @@ exports.resetPartnerPassword = functions.https.onCall(async (data, context) => {
  * Callable Function: togglePartnerStatus
  * Enables or disables the partner's Firebase Auth login account and updates Firestore.
  */
-exports.togglePartnerStatus = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      'unauthenticated',
-      'Only WebRyza administrators can activate or deactivate partners.'
-    );
-  }
+exports.togglePartnerStatus = onCall(FUNCTION_OPTS, async (request) => {
+  verifyAdmin(request);
 
-  const { partnerId, isActive } = data || {};
+  const { partnerId, isActive } = request.data || {};
   if (!partnerId || typeof isActive !== 'boolean') {
-    throw new functions.https.HttpsError('invalid-argument', 'Partner ID and active boolean state are required.');
+    throw new HttpsError('invalid-argument', 'Partner ID and active boolean state are required.');
   }
 
   const partnerDocRef = db.collection('wedding_partners').doc(String(partnerId).trim());
   const partnerSnap = await partnerDocRef.get();
   if (!partnerSnap.exists) {
-    throw new functions.https.HttpsError('not-found', 'Partner not found.');
+    throw new HttpsError('not-found', 'Partner not found.');
   }
 
   const partnerData = partnerSnap.data();
   const authUid = partnerData.authUid;
 
-  // Disable/enable Firebase Auth user login if user exists
   if (authUid) {
     try {
       await admin.auth().updateUser(authUid, {
         disabled: !isActive
       });
     } catch (err) {
-      console.warn('Could not update Auth user status:', err);
+      console.warn('Could not toggle Auth user status:', err);
     }
   }
 
@@ -353,35 +429,110 @@ exports.togglePartnerStatus = functions.https.onCall(async (data, context) => {
 });
 
 /**
- * Callable Function: lookupPartnerUsername
- * Public/Portal helper for cards.webryza.in login screen:
- * Resolves username to internal auth email so partners can log in with username only.
+ * Callable Function: deletePartnerAccount
+ * Safely deletes a partner account:
+ * 1. Verifies admin authorization
+ * 2. Preserves all linked wedding cards and payment records (unlinks partner, sets Former Partner)
+ * 3. Deletes the associated Firebase Authentication user account
+ * 4. Cleans up the username mapping in partner_usernames so the username is completely released
+ * 5. Deletes the partner document from wedding_partners
  */
-exports.lookupPartnerUsername = functions.https.onCall(async (data) => {
-  const { username } = data || {};
-  if (!username) {
-    throw new functions.https.HttpsError('invalid-argument', 'Username is required.');
+exports.deletePartnerAccount = onCall(FUNCTION_OPTS, async (request) => {
+  verifyAdmin(request);
+
+  const { partnerId } = request.data || {};
+  if (!partnerId) {
+    throw new HttpsError('invalid-argument', 'Partner ID is required.');
   }
 
-  const clean = String(username).toLowerCase().trim();
-  const docSnap = await db.collection('partner_usernames').doc(clean).get();
-  if (!docSnap.exists) {
-    throw new functions.https.HttpsError('not-found', 'Invalid username or password.');
+  const partnerDocRef = db.collection('wedding_partners').doc(String(partnerId).trim());
+  const partnerSnap = await partnerDocRef.get();
+  if (!partnerSnap.exists) {
+    throw new HttpsError('not-found', 'Partner document not found.');
   }
 
-  const record = docSnap.data();
-  // Check if partner is active
-  const partnerSnap = await db.collection('wedding_partners').doc(record.partnerCode || record.partnerId).get();
-  if (partnerSnap.exists && partnerSnap.data().isActive === false) {
-    throw new functions.https.HttpsError(
-      'permission-denied',
-      'This partner account has been deactivated. Please contact WebRyza admin.'
-    );
+  const partnerData = partnerSnap.data();
+  const shopName = partnerData.shopName || 'Deleted Partner';
+  const cleanUsername = normalizeUsername(partnerData.username);
+  const authUid = partnerData.authUid;
+
+  // 1. Preserve historical wedding cards and payment histories
+  const cardsSnap = await db.collection('wedding_cards').where('partnerId', '==', partnerId).get();
+  if (!cardsSnap.empty) {
+    const cardsBatch = db.batch();
+    cardsSnap.forEach((cardDoc) => {
+      cardsBatch.update(cardDoc.ref, {
+        partnerId: '',
+        partnerShopName: `${shopName} (Former Partner)`,
+        source: 'direct',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    await cardsBatch.commit();
+  }
+
+  // 2. Safely delete the Firebase Authentication user account
+  if (authUid) {
+    try {
+      await admin.auth().deleteUser(authUid);
+    } catch (authDeleteErr) {
+      console.warn('Auth user deletion warning (may already be deleted):', authDeleteErr);
+    }
+  } else if (cleanUsername) {
+    try {
+      const user = await admin.auth().getUserByEmail(`${cleanUsername}@partner.webryza.in`);
+      if (user) {
+        await admin.auth().deleteUser(user.uid);
+      }
+    } catch (e) {
+      console.warn('Lookup by email for deletion note:', e.message);
+    }
+  }
+
+  // 3. Atomically delete partner document and release username mapping
+  const cleanupBatch = db.batch();
+  if (cleanUsername) {
+    cleanupBatch.delete(db.collection('partner_usernames').doc(cleanUsername));
+  }
+  cleanupBatch.delete(partnerDocRef);
+  await cleanupBatch.commit();
+
+  return {
+    success: true,
+    message: `Partner "${shopName}" and username "${cleanUsername}" have been safely released.`
+  };
+});
+
+/**
+ * Public/Portal helper for cards.webryza.in login screen:
+ * Resolves a username to its internal partner profile.
+ * Only returns active partners, never returns passwords.
+ */
+exports.lookupPartnerUsername = onCall(FUNCTION_OPTS, async (request) => {
+  const { username } = request.data || {};
+  const clean = normalizeUsername(username);
+
+  if (!clean) {
+    throw new HttpsError('invalid-argument', 'Username is required.');
+  }
+
+  const usernameDoc = await db.collection('partner_usernames').doc(clean).get();
+  if (!usernameDoc.exists) {
+    return { exists: false };
+  }
+
+  const data = usernameDoc.data();
+  const partnerDoc = await db.collection('wedding_partners').doc(data.partnerId).get();
+
+  if (!partnerDoc.exists || partnerDoc.data().isActive === false) {
+    return { exists: false, inactive: true };
   }
 
   return {
-    internalEmail: record.internalEmail || `${clean}@partner.webryza.in`,
-    partnerCode: record.partnerCode,
-    shopName: partnerSnap.exists ? partnerSnap.data().shopName : ''
+    exists: true,
+    partnerCode: data.partnerCode,
+    partnerId: data.partnerId,
+    shopName: partnerDoc.data().shopName,
+    internalEmail: data.internalEmail
   };
 });

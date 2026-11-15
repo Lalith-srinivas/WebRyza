@@ -41,7 +41,11 @@ export default function ResetPasswordModal({ partner, isOpen, onClose, onResetPa
       onClose();
     } catch (err) {
       console.error('Error resetting password:', err);
-      setError(err.message || 'Failed to reset partner password.');
+      let msg = err.message || 'Failed to reset partner password.';
+      if (msg.toLowerCase() === 'internal' || err.code === 'functions/internal') {
+        msg = 'Cloud Function unavailable or encountered an error. Please verify backend functions or retry.';
+      }
+      setError(msg);
     } finally {
       setIsSubmitting(false);
     }

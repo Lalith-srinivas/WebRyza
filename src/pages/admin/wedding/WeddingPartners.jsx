@@ -137,7 +137,7 @@ export default function WeddingPartners() {
       console.error('Failed to toggle partner status:', err);
       setToast({
         type: 'error',
-        message: 'Failed to update partner status.'
+        message: err.message || 'Failed to update partner status.'
       });
     }
   };
@@ -170,7 +170,7 @@ export default function WeddingPartners() {
       await deletePartner(deleteConfirmPartner.id);
       setToast({
         type: 'success',
-        message: `Partner "${deleteConfirmPartner.shopName}" deleted successfully.`
+        message: `Partner "${deleteConfirmPartner.shopName}" deleted and username released successfully.`
       });
       setDeleteConfirmPartner(null);
       if (detailPartner?.id === deleteConfirmPartner.id) {
@@ -180,7 +180,7 @@ export default function WeddingPartners() {
       console.error('Failed to delete partner:', err);
       setToast({
         type: 'error',
-        message: 'Failed to delete partner shop.'
+        message: err.message || 'Failed to delete partner shop.'
       });
     }
   };

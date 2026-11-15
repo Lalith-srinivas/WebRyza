@@ -41,7 +41,11 @@ export default function ChangeUsernameModal({ partner, isOpen, onClose, onChange
       onClose();
     } catch (err) {
       console.error('Error changing username:', err);
-      setError(err.message || 'Failed to update username.');
+      let msg = err.message || 'Failed to update username.';
+      if (msg.toLowerCase() === 'internal' || err.code === 'functions/internal') {
+        msg = 'Cloud Function unavailable or encountered an error. Please verify backend functions or retry.';
+      }
+      setError(msg);
     } finally {
       setIsSubmitting(false);
     }

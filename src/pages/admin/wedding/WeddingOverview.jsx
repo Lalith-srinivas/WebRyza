@@ -64,7 +64,7 @@ export default function WeddingOverview() {
       console.error('Failed to delete partner:', err);
       setToast({
         type: 'error',
-        message: 'Failed to delete partner shop.'
+        message: err.message || 'Failed to delete partner shop.'
       });
     }
   };
