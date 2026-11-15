@@ -10,11 +10,11 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 import { 
-  fetchAllWeddingCards, 
-  fetchAllPartners, 
   createWeddingCard, 
   recordWeddingPayment, 
-  deleteWeddingCard 
+  deleteWeddingCard,
+  subscribeToWeddingCards,
+  subscribeToPartners
 } from '../../../services/weddingService';
 import { 
   formatCurrency, 
@@ -50,24 +50,31 @@ export default function WeddingProjects() {
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    const unsubCards = subscribeToWeddingCards(
+      (cardsList) => {
+        setProjects(cardsList);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Error in wedding cards subscription:', err);
+        setLoading(false);
+      }
+    );
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [cardsList, partnersList] = await Promise.all([
-        fetchAllWeddingCards(),
-        fetchAllPartners()
-      ]);
-      setProjects(cardsList);
-      setPartners(partnersList);
-    } catch (err) {
-      console.error('Error fetching wedding projects:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const unsubPartners = subscribeToPartners(
+      (partnersList) => {
+        setPartners(partnersList);
+      },
+      (err) => {
+        console.error('Error in partners subscription:', err);
+      }
+    );
+
+    return () => {
+      unsubCards();
+      unsubPartners();
+    };
+  }, []);
 
   const handleCreateProject = async (formData) => {
     await createWeddingCard(formData);
@@ -75,7 +82,6 @@ export default function WeddingProjects() {
       type: 'success',
       message: 'New wedding project created successfully!'
     });
-    await loadData();
   };
 
   const handleSavePayment = async (paymentData) => {
@@ -84,7 +90,6 @@ export default function WeddingProjects() {
       type: 'success',
       message: `Recorded payment of ${formatCurrency(paymentData.amount)}!`
     });
-    await loadData();
   };
 
   const executeDeleteProject = async () => {
@@ -96,7 +101,6 @@ export default function WeddingProjects() {
         type: 'success',
         message: 'Wedding project permanently deleted.'
       });
-      await loadData();
     } catch (err) {
       console.error('Failed to delete project:', err);
       setToast({
@@ -498,12 +502,12 @@ export default function WeddingProjects() {
 
       {/* Project Details Modal */}
       <WeddingProjectDetailModal
-        project={selectedProject}
+        project={selectedProject ? projects.find((p) => p.id === selectedProject.id) || selectedProject : null}
         isOpen={Boolean(selectedProject)}
         onClose={() => setSelectedProject(null)}
         onOpenRecordPayment={(proj) => setPaymentProject(proj)}
         onShowToast={(t) => setToast(t)}
-        onProjectUpdated={loadData}
+        onProjectUpdated={() => {}}
       />
 
       {/* Create Project Modal */}

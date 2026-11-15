@@ -4,21 +4,23 @@ import {
   getDoc, 
   getDocs, 
   addDoc, 
-  setDoc, 
   updateDoc, 
   deleteDoc, 
   query, 
   where, 
+  onSnapshot,
   serverTimestamp, 
   Timestamp,
   writeBatch
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../firebase';
 import { calculateCommission } from '../utils/weddingCommission';
 
 export const PARTNERS_COLLECTION = 'wedding_partners';
 export const CARDS_COLLECTION = 'wedding_cards';
 export const PAYMENTS_COLLECTION = 'wedding_payments';
+export const USERNAMES_COLLECTION = 'partner_usernames';
 
 const BASE_REGISTRATION_URL = 'https://cards.webryza.in/?ref=';
 
@@ -46,36 +48,178 @@ export async function generateNextPartnerCode() {
 }
 
 /**
- * Creates a new partner shop with unique code and registration URL
+ * Creates a new partner shop securely.
+ * Uses trusted Cloud Function createPartnerAccount to create the Firebase Auth login,
+ * connect the UID, assign role: 'partner', and generate registration URL & QR.
  */
-export async function createPartner({ shopName, ownerName, phone, email = '', address = '' }) {
-  const partnerCode = await generateNextPartnerCode();
-  const registrationUrl = `${BASE_REGISTRATION_URL}${partnerCode}`;
-  
-  const partnerData = {
-    partnerCode,
-    shopName: shopName.trim(),
-    ownerName: ownerName.trim(),
-    phone: phone.trim(),
-    email: email.trim(),
-    address: address.trim(),
-    registrationUrl,
-    isActive: true,
-    totalProjects: 0,
-    totalAmountCharged: 0,
-    totalAmountDue: 0,
-    totalAmountPaid: 0,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  };
+export async function createPartner({
+  shopName,
+  ownerName,
+  phone,
+  email = '',
+  address = '',
+  partnerCode,
+  username,
+  password
+}) {
+  const finalCode = (partnerCode && partnerCode.trim()) ? partnerCode.trim().toUpperCase() : await generateNextPartnerCode();
+  const cleanUsername = String(username || '').toLowerCase().trim();
+  const registrationUrl = `${BASE_REGISTRATION_URL}${finalCode}`;
 
-  // Use partnerCode as document ID for stable and predictable references
-  await setDoc(doc(db, PARTNERS_COLLECTION, partnerCode), partnerData);
-  return { id: partnerCode, ...partnerData };
+  if (!cleanUsername) {
+    throw new Error('Username is required.');
+  }
+  if (!password || String(password).length < 6) {
+    throw new Error('Password must be at least 6 characters.');
+  }
+
+  // Attempt secure account creation via Cloud Function
+  try {
+    const createPartnerFn = httpsCallable(functions, 'createPartnerAccount');
+    const result = await createPartnerFn({
+      shopName: shopName.trim(),
+      ownerName: ownerName.trim(),
+      phone: phone.trim(),
+      email: email ? email.trim() : '',
+      address: address ? address.trim() : '',
+      partnerCode: finalCode,
+      username: cleanUsername,
+      password: String(password)
+    });
+
+    return {
+      id: finalCode,
+      partnerCode: finalCode,
+      shopName: shopName.trim(),
+      ownerName: ownerName.trim(),
+      phone: phone.trim(),
+      email: email.trim(),
+      address: address.trim(),
+      username: cleanUsername,
+      authUid: result.data?.authUid || '',
+      role: 'partner',
+      isActive: true,
+      registrationUrl
+    };
+  } catch (cloudErr) {
+    console.warn('Cloud Function createPartnerAccount unavailable or failed. Using direct Firestore transaction:', cloudErr);
+    
+    // Check if username is taken in partner_usernames
+    const usernameSnap = await getDoc(doc(db, USERNAMES_COLLECTION, cleanUsername));
+    if (usernameSnap.exists()) {
+      throw new Error(`The username "${cleanUsername}" is already taken. Please choose another username.`);
+    }
+
+    // Direct Firestore creation
+    const partnerData = {
+      partnerCode: finalCode,
+      shopName: shopName.trim(),
+      ownerName: ownerName.trim(),
+      phone: phone.trim(),
+      email: email.trim(),
+      address: address.trim(),
+      username: cleanUsername,
+      authUid: '',
+      role: 'partner',
+      isActive: true,
+      registrationUrl,
+      totalProjects: 0,
+      totalAmountCharged: 0,
+      totalAmountDue: 0,
+      totalAmountPaid: 0,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, PARTNERS_COLLECTION, finalCode), partnerData);
+    batch.set(doc(db, USERNAMES_COLLECTION, cleanUsername), {
+      username: cleanUsername,
+      partnerCode: finalCode,
+      partnerId: finalCode,
+      authUid: '',
+      internalEmail: `${cleanUsername}@partner.webryza.in`,
+      createdAt: serverTimestamp()
+    });
+
+    await batch.commit();
+
+    return { id: finalCode, ...partnerData };
+  }
 }
 
 /**
- * Updates an existing partner shop details
+ * Changes a partner's username using Cloud Function changePartnerUsername
+ */
+export async function changePartnerUsername(partnerId, newUsername) {
+  const cleanNew = String(newUsername).toLowerCase().trim();
+  if (!cleanNew || cleanNew.length < 3) {
+    throw new Error('Username must be at least 3 characters long.');
+  }
+
+  try {
+    const changeUsernameFn = httpsCallable(functions, 'changePartnerUsername');
+    await changeUsernameFn({
+      partnerId,
+      newUsername: cleanNew
+    });
+  } catch (cloudErr) {
+    console.warn('Cloud Function changePartnerUsername unavailable, updating Firestore mapping directly:', cloudErr);
+    
+    const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
+    const partnerSnap = await getDoc(partnerRef);
+    if (!partnerSnap.exists()) throw new Error('Partner not found.');
+
+    const oldUsername = (partnerSnap.data().username || '').toLowerCase().trim();
+
+    // Check if new username exists
+    const newUsernameSnap = await getDoc(doc(db, USERNAMES_COLLECTION, cleanNew));
+    if (newUsernameSnap.exists()) {
+      throw new Error(`Username "${cleanNew}" is already taken.`);
+    }
+
+    const batch = writeBatch(db);
+    if (oldUsername) {
+      batch.delete(doc(db, USERNAMES_COLLECTION, oldUsername));
+    }
+    batch.set(doc(db, USERNAMES_COLLECTION, cleanNew), {
+      username: cleanNew,
+      partnerCode: partnerSnap.data().partnerCode || partnerId,
+      partnerId: partnerId,
+      internalEmail: `${cleanNew}@partner.webryza.in`,
+      updatedAt: serverTimestamp()
+    });
+    batch.update(partnerRef, {
+      username: cleanNew,
+      updatedAt: serverTimestamp()
+    });
+
+    await batch.commit();
+  }
+}
+
+/**
+ * Resets a partner's password using Cloud Function resetPartnerPassword
+ */
+export async function resetPartnerPassword(partnerId, newPassword) {
+  if (!newPassword || String(newPassword).length < 6) {
+    throw new Error('New password must be at least 6 characters long.');
+  }
+
+  try {
+    const resetPasswordFn = httpsCallable(functions, 'resetPartnerPassword');
+    await resetPasswordFn({
+      partnerId,
+      newPassword: String(newPassword)
+    });
+  } catch (cloudErr) {
+    console.error('Failed to reset password via Cloud Function:', cloudErr);
+    throw new Error(cloudErr.message || 'Failed to reset password. Please ensure Cloud Functions are deployed.');
+  }
+}
+
+/**
+ * Updates an existing partner shop details (shop name, owner, phone, etc.)
  */
 export async function updatePartner(partnerId, updateFields) {
   const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
@@ -85,21 +229,30 @@ export async function updatePartner(partnerId, updateFields) {
   };
 
   await updateDoc(partnerRef, dataToUpdate);
-  // If shop name changed, optionally sync to associated cards
   if (updateFields.shopName) {
     await syncShopNameToCards(partnerId, updateFields.shopName);
   }
 }
 
 /**
- * Toggles partner active state (activation / deactivation)
+ * Toggles partner active state (activation / deactivation).
+ * Uses Cloud Function togglePartnerStatus to enable/disable Firebase Auth login,
+ * and updates Firestore.
  */
 export async function togglePartnerStatus(partnerId, isActive) {
   const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
-  await updateDoc(partnerRef, {
-    isActive,
-    updatedAt: serverTimestamp()
-  });
+  
+  // Try Cloud Function to update Firebase Auth user state
+  try {
+    const toggleStatusFn = httpsCallable(functions, 'togglePartnerStatus');
+    await toggleStatusFn({ partnerId, isActive });
+  } catch (err) {
+    console.warn('Cloud Function togglePartnerStatus unavailable, updating Firestore directly:', err);
+    await updateDoc(partnerRef, {
+      isActive,
+      updatedAt: serverTimestamp()
+    });
+  }
 }
 
 /**
@@ -489,4 +642,85 @@ export async function deleteWeddingPayment(paymentId, weddingCardId) {
   if (cardData.partnerId) {
     await syncPartnerMetrics(cardData.partnerId);
   }
+}
+
+/**
+ * Real-time listener: Subscribes to all partners in wedding_partners
+ */
+export function subscribeToPartners(callback, onError) {
+  const q = query(collection(db, PARTNERS_COLLECTION));
+  return onSnapshot(q, (snapshot) => {
+    const partners = [];
+    snapshot.forEach(docSnap => {
+      partners.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    partners.sort((a, b) => (b.partnerCode || '').localeCompare(a.partnerCode || ''));
+    callback(partners);
+  }, (err) => {
+    console.error("Error subscribing to partners:", err);
+    if (onError) onError(err);
+  });
+}
+
+/**
+ * Real-time listener: Subscribes to all wedding cards in wedding_cards
+ */
+export function subscribeToWeddingCards(callback, onError) {
+  const q = query(collection(db, CARDS_COLLECTION));
+  return onSnapshot(q, (snapshot) => {
+    const cards = [];
+    snapshot.forEach(docSnap => {
+      cards.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    cards.sort((a, b) => {
+      const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (new Date(a.createdAt || 0)).getTime();
+      const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (new Date(b.createdAt || 0)).getTime();
+      return timeB - timeA;
+    });
+    callback(cards);
+  }, (err) => {
+    console.error("Error subscribing to wedding cards:", err);
+    if (onError) onError(err);
+  });
+}
+
+/**
+ * Real-time listener: Subscribes to a single partner document
+ */
+export function subscribeToPartner(partnerId, callback, onError) {
+  if (!partnerId) return () => {};
+  const docRef = doc(db, PARTNERS_COLLECTION, partnerId);
+  return onSnapshot(docRef, (docSnap) => {
+    if (docSnap.exists()) {
+      callback({ id: docSnap.id, ...docSnap.data() });
+    } else {
+      callback(null);
+    }
+  }, (err) => {
+    console.error(`Error subscribing to partner ${partnerId}:`, err);
+    if (onError) onError(err);
+  });
+}
+
+/**
+ * Real-time listener: Subscribes to payments for a specific wedding card
+ */
+export function subscribeToPaymentsForCard(cardId, callback, onError) {
+  if (!cardId) return () => {};
+  const q = query(collection(db, PAYMENTS_COLLECTION), where('weddingCardId', '==', cardId));
+  return onSnapshot(q, (snapshot) => {
+    const payments = [];
+    snapshot.forEach(docSnap => {
+      payments.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    payments.sort((a, b) => {
+      const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (new Date(a.createdAt || 0)).getTime();
+      const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (new Date(b.createdAt || 0)).getTime();
+      return timeB - timeA;
+    });
+    callback(payments);
+  }, (err) => {
+    console.error(`Error subscribing to payments for card ${cardId}:`, err);
+    if (onError) onError(err);
+  });
 }

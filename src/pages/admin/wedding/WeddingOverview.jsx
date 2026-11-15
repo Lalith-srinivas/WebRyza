@@ -12,11 +12,13 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { 
-  fetchAllWeddingCards, 
-  fetchAllPartners, 
   recordWeddingPayment,
   togglePartnerStatus,
-  deletePartner
+  deletePartner,
+  changePartnerUsername,
+  resetPartnerPassword,
+  subscribeToPartners,
+  subscribeToWeddingCards
 } from '../../../services/weddingService';
 import { 
   formatCurrency, 
@@ -27,6 +29,8 @@ import WeddingProjectDetailModal from '../../../components/admin/wedding/Wedding
 import RecordPaymentModal from '../../../components/admin/wedding/RecordPaymentModal';
 import PartnerDetailModal from '../../../components/admin/wedding/PartnerDetailModal';
 import PartnerQrModal from '../../../components/admin/wedding/PartnerQrModal';
+import ChangeUsernameModal from '../../../components/admin/wedding/ChangeUsernameModal';
+import ResetPasswordModal from '../../../components/admin/wedding/ResetPasswordModal';
 import Toast from '../../../components/admin/wedding/Toast';
 
 export default function WeddingOverview() {
@@ -39,6 +43,8 @@ export default function WeddingOverview() {
   const [paymentProject, setPaymentProject] = useState(null);
   const [selectedPartner, setSelectedPartner] = useState(null);
   const [qrPartner, setQrPartner] = useState(null);
+  const [usernamePartner, setUsernamePartner] = useState(null);
+  const [passwordPartner, setPasswordPartner] = useState(null);
   const [toast, setToast] = useState(null);
   const [deleteConfirmPartner, setDeleteConfirmPartner] = useState(null);
 
@@ -54,7 +60,6 @@ export default function WeddingOverview() {
       if (selectedPartner?.id === deleteConfirmPartner.id) {
         setSelectedPartner(null);
       }
-      await loadData();
     } catch (err) {
       console.error('Failed to delete partner:', err);
       setToast({
@@ -65,24 +70,20 @@ export default function WeddingOverview() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [cardsList, partnersList] = await Promise.all([
-        fetchAllWeddingCards(),
-        fetchAllPartners()
-      ]);
-      setProjects(cardsList);
+    const unsubPartners = subscribeToPartners((partnersList) => {
       setPartners(partnersList);
-    } catch (err) {
-      console.error('Error loading overview data:', err);
-    } finally {
       setLoading(false);
-    }
-  };
+    }, () => setLoading(false));
+
+    const unsubCards = subscribeToWeddingCards((cardsList) => {
+      setProjects(cardsList);
+    });
+
+    return () => {
+      unsubPartners();
+      unsubCards();
+    };
+  }, []);
 
   // Calculations dynamically computed
   const totalProjects = projects.length;
@@ -109,7 +110,6 @@ export default function WeddingOverview() {
       type: 'success',
       message: `Recorded payment of ${formatCurrency(paymentData.amount)} successfully!`
     });
-    await loadData();
     if (selectedProject) {
       const updated = projects.find((p) => p.id === selectedProject.id);
       if (updated) setSelectedProject(updated);
@@ -486,7 +486,7 @@ export default function WeddingOverview() {
         onClose={() => setSelectedProject(null)}
         onOpenRecordPayment={(proj) => setPaymentProject(proj)}
         onShowToast={(t) => setToast(t)}
-        onProjectUpdated={loadData}
+        onProjectUpdated={() => {}}
       />
 
       {/* Payment Recording Modal */}
@@ -509,7 +509,6 @@ export default function WeddingOverview() {
         onToggleStatus={async (pId, pActive) => {
           await togglePartnerStatus(pId, pActive);
           setToast({ type: 'success', message: pActive ? 'Partner activated.' : 'Partner deactivated.' });
-          await loadData();
           setSelectedPartner(null);
         }}
         onDelete={(p) => {
@@ -521,6 +520,8 @@ export default function WeddingOverview() {
           navigator.clipboard.writeText(p.registrationUrl);
           setToast({ type: 'success', message: 'Registration link copied!' });
         }}
+        onOpenChangeUsername={(p) => setUsernamePartner(p)}
+        onOpenResetPassword={(p) => setPasswordPartner(p)}
         onSelectProject={(proj) => {
           setSelectedPartner(null);
           setSelectedProject(proj);
@@ -532,6 +533,28 @@ export default function WeddingOverview() {
         partner={qrPartner}
         onClose={() => setQrPartner(null)}
         onShowToast={(t) => setToast(t)}
+      />
+
+      {/* Change Username Modal */}
+      <ChangeUsernameModal
+        partner={usernamePartner}
+        isOpen={Boolean(usernamePartner)}
+        onClose={() => setUsernamePartner(null)}
+        onChangeUsername={async (partnerId, newUsername) => {
+          await changePartnerUsername(partnerId, newUsername);
+          setToast({ type: 'success', message: `Username updated to "${newUsername}"!` });
+        }}
+      />
+
+      {/* Reset Password Modal */}
+      <ResetPasswordModal
+        partner={passwordPartner}
+        isOpen={Boolean(passwordPartner)}
+        onClose={() => setPasswordPartner(null)}
+        onResetPassword={async (partnerId, newPassword) => {
+          await resetPartnerPassword(partnerId, newPassword);
+          setToast({ type: 'success', message: 'Partner password reset successfully in Firebase Auth!' });
+        }}
       />
 
       {/* Delete Partner Confirmation Modal */}

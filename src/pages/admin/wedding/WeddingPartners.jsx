@@ -11,22 +11,28 @@ import {
   Edit2, 
   Power, 
   Eye, 
-  Check,
-  Trash2
+  Check, 
+  Trash2,
+  Key,
+  Lock
 } from 'lucide-react';
 import { 
-  fetchAllPartners, 
-  fetchAllWeddingCards, 
   createPartner, 
   updatePartner, 
-  togglePartnerStatus,
-  deletePartner
+  togglePartnerStatus, 
+  deletePartner,
+  changePartnerUsername,
+  resetPartnerPassword,
+  subscribeToPartners,
+  subscribeToWeddingCards
 } from '../../../services/weddingService';
 import { formatCurrency } from '../../../utils/weddingCommission';
 import PartnerModal from '../../../components/admin/wedding/PartnerModal';
 import PartnerQrModal from '../../../components/admin/wedding/PartnerQrModal';
 import PartnerDetailModal from '../../../components/admin/wedding/PartnerDetailModal';
 import WeddingProjectDetailModal from '../../../components/admin/wedding/WeddingProjectDetailModal';
+import ChangeUsernameModal from '../../../components/admin/wedding/ChangeUsernameModal';
+import ResetPasswordModal from '../../../components/admin/wedding/ResetPasswordModal';
 import Toast from '../../../components/admin/wedding/Toast';
 
 export default function WeddingPartners() {
@@ -43,30 +49,41 @@ export default function WeddingPartners() {
   const [editingPartner, setEditingPartner] = useState(null);
   const [qrPartner, setQrPartner] = useState(null);
   const [detailPartner, setDetailPartner] = useState(null);
+  const [usernamePartner, setUsernamePartner] = useState(null);
+  const [passwordPartner, setPasswordPartner] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [toast, setToast] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [copiedUser, setCopiedUser] = useState(null);
   const [deleteConfirmPartner, setDeleteConfirmPartner] = useState(null);
 
+  // Real-time synchronization
   useEffect(() => {
-    loadData();
-  }, []);
+    const unsubscribePartners = subscribeToPartners(
+      (partnersList) => {
+        setPartners(partnersList);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Error subscribing to partners:', err);
+        setLoading(false);
+      }
+    );
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [partnersList, cardsList] = await Promise.all([
-        fetchAllPartners(),
-        fetchAllWeddingCards()
-      ]);
-      setPartners(partnersList);
-      setProjects(cardsList);
-    } catch (err) {
-      console.error('Error loading partners data:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const unsubscribeCards = subscribeToWeddingCards(
+      (cardsList) => {
+        setProjects(cardsList);
+      },
+      (err) => {
+        console.error('Error subscribing to wedding cards:', err);
+      }
+    );
+
+    return () => {
+      unsubscribePartners();
+      unsubscribeCards();
+    };
+  }, []);
 
   const handleSavePartner = async (partnerData, partnerId) => {
     if (partnerId) {
@@ -79,10 +96,31 @@ export default function WeddingPartners() {
       const created = await createPartner(partnerData);
       setToast({
         type: 'success',
-        message: `Registered partner ${created.shopName} (${created.partnerCode})!`
+        message: `Registered partner ${created.shopName} (${created.partnerCode})! QR & credentials generated.`
       });
+      // Show QR and link copy options immediately
+      setQrPartner(created);
     }
-    await loadData();
+  };
+
+  const handleChangeUsername = async (partnerId, newUsername) => {
+    await changePartnerUsername(partnerId, newUsername);
+    setToast({
+      type: 'success',
+      message: `Username changed to "${newUsername}" successfully!`
+    });
+    // Update local state if partner details modal is open
+    if (detailPartner && detailPartner.id === partnerId) {
+      setDetailPartner((prev) => ({ ...prev, username: newUsername }));
+    }
+  };
+
+  const handleResetPassword = async (partnerId, newPassword) => {
+    await resetPartnerPassword(partnerId, newPassword);
+    setToast({
+      type: 'success',
+      message: 'Partner password has been reset securely in Firebase Auth!'
+    });
   };
 
   const handleToggleStatus = async (partnerId, newStatus) => {
@@ -90,9 +128,8 @@ export default function WeddingPartners() {
       await togglePartnerStatus(partnerId, newStatus);
       setToast({
         type: 'success',
-        message: newStatus ? 'Partner activated.' : 'Partner deactivated. New registrations will be blocked.'
+        message: newStatus ? 'Partner activated.' : 'Partner deactivated. Logins and new registrations are blocked.'
       });
-      await loadData();
       if (detailPartner && detailPartner.id === partnerId) {
         setDetailPartner((prev) => ({ ...prev, isActive: newStatus }));
       }
@@ -111,9 +148,20 @@ export default function WeddingPartners() {
     setCopiedId(partner.id);
     setToast({
       type: 'success',
-      message: `Copied link for ${partner.shopName}!`
+      message: `Copied registration link for ${partner.shopName}!`
     });
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleCopyUsername = (partner) => {
+    const username = partner.username || partner.partnerCode.toLowerCase();
+    navigator.clipboard.writeText(username);
+    setCopiedUser(partner.id);
+    setToast({
+      type: 'success',
+      message: `Copied username "${username}"!`
+    });
+    setTimeout(() => setCopiedUser(null), 2000);
   };
 
   const executeDeletePartner = async () => {
@@ -128,7 +176,6 @@ export default function WeddingPartners() {
       if (detailPartner?.id === deleteConfirmPartner.id) {
         setDetailPartner(null);
       }
-      await loadData();
     } catch (err) {
       console.error('Failed to delete partner:', err);
       setToast({
@@ -145,7 +192,8 @@ export default function WeddingPartners() {
       const owner = (p.ownerName || '').toLowerCase();
       const code = (p.partnerCode || '').toLowerCase();
       const phone = (p.phone || '').toLowerCase();
-      if (!shop.includes(term) && !owner.includes(term) && !code.includes(term) && !phone.includes(term)) {
+      const user = (p.username || '').toLowerCase();
+      if (!shop.includes(term) && !owner.includes(term) && !code.includes(term) && !phone.includes(term) && !user.includes(term)) {
         return false;
       }
     }
@@ -166,7 +214,7 @@ export default function WeddingPartners() {
           <Search size={18} color="var(--text-secondary)" />
           <input
             type="text"
-            placeholder="Search partners by shop name, owner, code, phone..."
+            placeholder="Search partners by shop name, username, ID, phone..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -190,7 +238,7 @@ export default function WeddingPartners() {
           }}
           style={{ marginLeft: 'auto' }}
         >
-          <Plus size={18} style={{ marginRight: '0.4rem' }} /> Add Partner Shop
+          <Plus size={18} style={{ marginRight: '0.4rem' }} /> Add Partner
         </button>
       </div>
 
@@ -209,7 +257,7 @@ export default function WeddingPartners() {
           <p style={{ color: 'var(--text-secondary)', maxWidth: '420px', margin: '0 auto 1.5rem' }}>
             {searchTerm || statusFilter !== 'all'
               ? 'No partner shops matched your search filter.'
-              : 'You have not onboarded any printing shops or card vendors yet. Click Add Partner Shop to get started.'}
+              : 'You have not onboarded any printing shops or card vendors yet. Click Add Partner to get started.'}
           </p>
           {searchTerm || statusFilter !== 'all' ? (
             <button
@@ -229,7 +277,7 @@ export default function WeddingPartners() {
                 setIsAddEditModalOpen(true);
               }}
             >
-              <Plus size={16} style={{ marginRight: '0.4rem' }} /> Add Partner Shop
+              <Plus size={16} style={{ marginRight: '0.4rem' }} /> Add Partner
             </button>
           )}
         </div>
@@ -245,13 +293,14 @@ export default function WeddingPartners() {
             const outstanding = Math.max(0, totalShare - totalPaid);
 
             const isCopied = copiedId === partner.id;
+            const isUserCopied = copiedUser === partner.id;
 
             return (
               <div key={partner.id} className="partner-card bg-glass">
                 {/* Header */}
                 <div className="partner-card-header">
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
                       <span className="partner-code-tag">{partner.partnerCode}</span>
                       <span className={`status-badge ${partner.isActive !== false ? 'active' : 'suspended'}`} style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}>
                         {partner.isActive !== false ? 'Active' : 'Deactivated'}
@@ -259,7 +308,7 @@ export default function WeddingPartners() {
                     </div>
                     <h3
                       style={{
-                        fontSize: '1.2rem',
+                        fontSize: '1.25rem',
                         fontWeight: 700,
                         color: 'white',
                         cursor: 'pointer',
@@ -271,6 +320,34 @@ export default function WeddingPartners() {
                       {partner.shopName}
                     </h3>
                   </div>
+                </div>
+
+                {/* Login Username Display & Quick Copy */}
+                <div style={{
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '10px',
+                  padding: '0.45rem 0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '0.85rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', overflow: 'hidden' }}>
+                    <Key size={14} color="var(--accent-neon)" />
+                    <span style={{ color: 'var(--text-secondary)' }}>Username:</span>
+                    <strong style={{ fontFamily: 'monospace', color: 'white' }}>
+                      {partner.username || partner.partnerCode.toLowerCase()}
+                    </strong>
+                  </div>
+                  <button
+                    onClick={() => handleCopyUsername(partner)}
+                    className="icon-btn"
+                    style={{ width: '26px', height: '26px', padding: 0 }}
+                    title="Copy Username"
+                  >
+                    {isUserCopied ? <Check size={13} color="var(--accent-neon)" /> : <Copy size={13} />}
+                  </button>
                 </div>
 
                 {/* Owner and Phone */}
@@ -321,7 +398,7 @@ export default function WeddingPartners() {
                   {partner.registrationUrl}
                 </div>
 
-                {/* Required Buttons: Download QR, Copy Link, Edit Partner, Deactivate Partner */}
+                {/* Partner Card Action Buttons */}
                 <div className="partner-card-actions">
                   <button
                     className="btn btn-primary btn-sm"
@@ -342,11 +419,27 @@ export default function WeddingPartners() {
 
                   <button
                     className="icon-btn"
+                    onClick={() => setUsernamePartner(partner)}
+                    title="Change Username"
+                  >
+                    <Key size={16} />
+                  </button>
+
+                  <button
+                    className="icon-btn"
+                    onClick={() => setPasswordPartner(partner)}
+                    title="Reset Password"
+                  >
+                    <Lock size={16} />
+                  </button>
+
+                  <button
+                    className="icon-btn"
                     onClick={() => {
                       setEditingPartner(partner);
                       setIsAddEditModalOpen(true);
                     }}
-                    title="Edit Partner"
+                    title="Edit Partner Shop"
                   >
                     <Edit2 size={16} />
                   </button>
@@ -400,6 +493,22 @@ export default function WeddingPartners() {
         onShowToast={(t) => setToast(t)}
       />
 
+      {/* Change Username Modal */}
+      <ChangeUsernameModal
+        partner={usernamePartner}
+        isOpen={Boolean(usernamePartner)}
+        onClose={() => setUsernamePartner(null)}
+        onChangeUsername={handleChangeUsername}
+      />
+
+      {/* Reset Password Modal */}
+      <ResetPasswordModal
+        partner={passwordPartner}
+        isOpen={Boolean(passwordPartner)}
+        onClose={() => setPasswordPartner(null)}
+        onResetPassword={handleResetPassword}
+      />
+
       {/* Partner Detail Modal */}
       <PartnerDetailModal
         partner={detailPartner}
@@ -419,6 +528,8 @@ export default function WeddingPartners() {
         }}
         onOpenQr={(p) => setQrPartner(p)}
         onCopyLink={handleCopyLink}
+        onOpenChangeUsername={(p) => setUsernamePartner(p)}
+        onOpenResetPassword={(p) => setPasswordPartner(p)}
         onSelectProject={(proj) => setSelectedProject(proj)}
       />
 
@@ -428,7 +539,7 @@ export default function WeddingPartners() {
         isOpen={Boolean(selectedProject)}
         onClose={() => setSelectedProject(null)}
         onShowToast={(t) => setToast(t)}
-        onProjectUpdated={loadData}
+        onProjectUpdated={() => {}}
       />
 
       {/* Delete Partner Confirmation Modal */}

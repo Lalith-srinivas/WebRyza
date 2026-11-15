@@ -8,31 +8,65 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // WebRyza Administrator: Any authenticated staff member who is not a partner
+    function isAdmin() {
+      return isAuthenticated() && 
+        (!('role' in request.auth.token) || request.auth.token.role != 'partner');
+    }
+
+    // Partner Role
+    function isPartner() {
+      return isAuthenticated() && 
+        ('role' in request.auth.token && request.auth.token.role == 'partner');
+    }
+
     // ==================================================
     // 1. WebRyza Existing Projects Collection
     // ==================================================
     match /projects/{projectId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if isAdmin();
     }
 
     // ==================================================
     // 2. Wedding Partners Collection
     // ==================================================
     match /wedding_partners/{partnerId} {
-      // Authenticated Admin has full access
-      allow read, write: if isAuthenticated();
+      // Administrators have full control
+      allow read, write: if isAdmin();
+
+      // Partners can only read their own record (cannot edit metrics or credentials)
+      allow get: if isPartner() && (
+        request.auth.uid == resource.data.authUid ||
+        request.auth.token.partnerCode == partnerId ||
+        request.auth.token.partnerId == partnerId
+      );
 
       // Public registration form can read active partner info to display shop name
-      // and verify active status (cannot list all partners or write)
+      // and verify active referral status
       allow get: if resource.data.isActive == true;
     }
 
     // ==================================================
-    // 3. Wedding Cards Collection
+    // 3. Partner Usernames Mapping Collection
+    // ==================================================
+    match /partner_usernames/{username} {
+      allow read, write: if isAdmin();
+      // Public / partner login lookup
+      allow get: if true;
+    }
+
+    // ==================================================
+    // 4. Wedding Cards Collection
     // ==================================================
     match /wedding_cards/{cardId} {
-      // Authenticated Admin has full control
-      allow read, write: if isAuthenticated();
+      // Administrators have full control
+      allow read, write: if isAdmin();
+
+      // Partners can only read wedding projects that belong to their partner ID
+      allow read: if isPartner() && (
+        resource.data.partnerId == request.auth.token.partnerCode ||
+        resource.data.partnerId == request.auth.token.partnerId
+      );
 
       // Secure public submission from cards.webryza.in registration form:
       // Validates required fields, enforces minimum ₹1,500 charge,
@@ -56,11 +90,17 @@ service cloud.firestore {
     }
 
     // ==================================================
-    // 4. Wedding Payments Collection
+    // 5. Wedding Payments Collection
     // ==================================================
     match /wedding_payments/{paymentId} {
-      // Only authenticated admin can view, record, or delete payments
-      allow read, write: if isAuthenticated();
+      // Only administrators can add, edit, or delete payment records
+      allow read, write: if isAdmin();
+
+      // Partners can read recorded payment receipts for their own projects only
+      allow read: if isPartner() && (
+        resource.data.partnerId == request.auth.token.partnerCode ||
+        resource.data.partnerId == request.auth.token.partnerId
+      );
     }
   }
 }
