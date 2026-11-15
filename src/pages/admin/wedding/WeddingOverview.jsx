@@ -16,7 +16,6 @@ import {
   togglePartnerStatus,
   deletePartner,
   changePartnerUsername,
-  resetPartnerPassword,
   subscribeToPartners,
   subscribeToWeddingCards
 } from '../../../services/weddingService';
@@ -51,10 +50,10 @@ export default function WeddingOverview() {
   const executeDeletePartner = async () => {
     if (!deleteConfirmPartner) return;
     try {
-      await deletePartner(deleteConfirmPartner.id);
+      const res = await deletePartner(deleteConfirmPartner.id);
       setToast({
         type: 'success',
-        message: `Partner "${deleteConfirmPartner.shopName}" deleted successfully.`
+        message: `Partner "${deleteConfirmPartner.shopName}" deleted and username "${res.releasedUsername}" released successfully.`
       });
       setDeleteConfirmPartner(null);
       if (selectedPartner?.id === deleteConfirmPartner.id) {
@@ -551,10 +550,6 @@ export default function WeddingOverview() {
         partner={passwordPartner}
         isOpen={Boolean(passwordPartner)}
         onClose={() => setPasswordPartner(null)}
-        onResetPassword={async (partnerId, newPassword) => {
-          await resetPartnerPassword(partnerId, newPassword);
-          setToast({ type: 'success', message: 'Partner password reset successfully in Firebase Auth!' });
-        }}
       />
 
       {/* Delete Partner Confirmation Modal */}

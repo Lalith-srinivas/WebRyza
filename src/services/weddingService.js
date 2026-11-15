@@ -13,8 +13,8 @@ import {
   Timestamp,
   writeBatch
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { db, auth } from '../firebase';
 import { calculateCommission } from '../utils/weddingCommission';
 
 export const PARTNERS_COLLECTION = 'wedding_partners';
@@ -22,42 +22,65 @@ export const CARDS_COLLECTION = 'wedding_cards';
 export const PAYMENTS_COLLECTION = 'wedding_payments';
 export const USERNAMES_COLLECTION = 'partner_usernames';
 
-const BASE_REGISTRATION_URL = 'https://cards.webryza.in/?ref=';
+export const BASE_REGISTRATION_URL = 'https://cards.webryza.in/?ref=';
 
 /**
- * Normalizes error messages from Cloud Functions callables
+ * Normalizes username to lowercase, trimmed, with non-alphanumeric chars stripped (allows _ and -)
  */
-function formatCallableError(err, fallbackMessage) {
-  console.error(fallbackMessage, err);
-  if (err?.code === 'functions/permission-denied') {
-    return new Error('Access denied. Only authorized WebRyza administrators can perform this action.');
+export function normalizeUsername(username) {
+  if (!username || typeof username !== 'string') return '';
+  return username.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+}
+
+/**
+ * Generates the deterministic synthetic email for a username.
+ * Every portal and admin tool uses this identical algorithm.
+ */
+export function usernameToEmail(username) {
+  const clean = normalizeUsername(username);
+  return clean ? `${clean}@partner.webryza.in` : '';
+}
+
+/**
+ * Checks if a username is available.
+ * Detects if a username is actively in use or is an orphaned stale mapping.
+ */
+export async function checkUsernameAvailability(username, currentPartnerId = null) {
+  const clean = normalizeUsername(username);
+  if (!clean || clean.length < 3) {
+    return { available: false, reason: 'Username must be at least 3 characters (letters, numbers, hyphens, underscores).' };
   }
-  if (err?.code === 'functions/unauthenticated') {
-    return new Error('You must be logged in as an administrator to perform this action.');
+
+  const usernameRef = doc(db, USERNAMES_COLLECTION, clean);
+  const usernameSnap = await getDoc(usernameRef);
+
+  if (!usernameSnap.exists()) {
+    return { available: true, cleanUsername: clean, loginEmail: usernameToEmail(clean) };
   }
-  if (err?.code === 'functions/already-exists') {
-    return new Error(err.message || 'This username or ID is already taken.');
+
+  const data = usernameSnap.data();
+  // If it's already assigned to the current partner being edited
+  if (currentPartnerId && (data.partnerId === currentPartnerId || data.partnerCode === currentPartnerId)) {
+    return { available: true, cleanUsername: clean, loginEmail: usernameToEmail(clean) };
   }
-  if (err?.code === 'functions/invalid-argument') {
-    return new Error(err.message || 'Invalid input provided.');
+
+  // Cross-check if the mapped partner document actually exists in wedding_partners
+  const partnerSnap = await getDoc(doc(db, PARTNERS_COLLECTION, data.partnerId || data.partnerCode || ''));
+  if (!partnerSnap.exists()) {
+    // The partner document was previously deleted, but this username mapping was orphaned!
+    return {
+      available: false,
+      isOrphaned: true,
+      cleanUsername: clean,
+      reason: `The username "${clean}" is held by an orphaned mapping from a previously deleted partner. Use the Diagnostic Tool in Partners to release it.`
+    };
   }
-  if (err?.code === 'functions/not-found') {
-    return new Error(err.message || 'Record not found.');
-  }
-  
-  const errMsg = String(err?.message || '').toLowerCase();
-  if (
-    errMsg === 'internal' ||
-    err?.code === 'functions/internal' ||
-    err?.code === 'functions/unavailable' ||
-    errMsg.includes('failed to fetch') ||
-    errMsg.includes('cors')
-  ) {
-    return new Error(
-      'Cloud Function request blocked or unavailable at us-central1. Ensure backend functions are deployed (firebase deploy --only functions).'
-    );
-  }
-  return new Error(err?.message || fallbackMessage);
+
+  return {
+    available: false,
+    cleanUsername: clean,
+    reason: `The username "${clean}" is already taken by ${partnerSnap.data().shopName || 'another partner'}.`
+  };
 }
 
 /**
@@ -84,10 +107,9 @@ export async function generateNextPartnerCode() {
 }
 
 /**
- * Creates a new partner shop securely.
- * Uses trusted Cloud Function createPartnerAccount to create the Firebase Auth login,
- * connect the UID, assign role: 'partner', and generate registration URL & QR.
- * Fails safely without creating partial records if the backend function fails.
+ * Creates a partner record in Firestore on the Firebase Spark plan.
+ * Deterministically maps username to internal login address `${username}@partner.webryza.in`.
+ * Does not pretend writing to Firestore creates an Auth account.
  */
 export async function createPartner({
   shopName,
@@ -97,91 +119,145 @@ export async function createPartner({
   address = '',
   partnerCode,
   username,
-  password
+  authUid = ''
 }) {
   const finalCode = (partnerCode && partnerCode.trim()) ? partnerCode.trim().toUpperCase() : await generateNextPartnerCode();
-  const cleanUsername = String(username || '').toLowerCase().trim();
+  const cleanUsername = normalizeUsername(username);
 
   if (!cleanUsername) {
     throw new Error('Username is required.');
   }
-  if (!password || String(password).length < 6) {
-    throw new Error('Password must be at least 6 characters.');
+  if (cleanUsername.length < 3) {
+    throw new Error('Username must be at least 3 characters long.');
   }
 
-  try {
-    const createPartnerFn = httpsCallable(functions, 'createPartnerAccount');
-    const result = await createPartnerFn({
-      shopName: shopName.trim(),
-      ownerName: ownerName.trim(),
-      phone: phone.trim(),
-      email: email ? email.trim() : '',
-      address: address ? address.trim() : '',
-      partnerCode: finalCode,
-      username: cleanUsername,
-      password: String(password)
-    });
-
-    return {
-      id: finalCode,
-      partnerCode: finalCode,
-      shopName: shopName.trim(),
-      ownerName: ownerName.trim(),
-      phone: phone.trim(),
-      email: email.trim(),
-      address: address.trim(),
-      username: cleanUsername,
-      authUid: result.data?.authUid || '',
-      role: 'partner',
-      isActive: true,
-      registrationUrl: result.data?.registrationUrl || `${BASE_REGISTRATION_URL}${finalCode}`
-    };
-  } catch (err) {
-    throw formatCallableError(err, 'Failed to create partner account.');
+  const check = await checkUsernameAvailability(cleanUsername);
+  if (!check.available) {
+    throw new Error(check.reason);
   }
+
+  const partnerDocRef = doc(db, PARTNERS_COLLECTION, finalCode);
+  const partnerSnap = await getDoc(partnerDocRef);
+  if (partnerSnap.exists()) {
+    throw new Error(`Partner ID "${finalCode}" already exists. Please choose another ID.`);
+  }
+
+  const loginEmail = usernameToEmail(cleanUsername);
+  const registrationUrl = `${BASE_REGISTRATION_URL}${finalCode}`;
+
+  const partnerData = {
+    partnerCode: finalCode,
+    shopName: String(shopName).trim(),
+    ownerName: String(ownerName).trim(),
+    phone: String(phone).trim(),
+    email: email ? String(email).trim() : '',
+    address: address ? String(address).trim() : '',
+    username: cleanUsername,
+    loginEmail,
+    authUid: authUid ? String(authUid).trim() : '',
+    role: 'partner',
+    isActive: true,
+    registrationUrl,
+    totalProjects: 0,
+    totalAmountCharged: 0,
+    totalAmountDue: 0,
+    totalAmountPaid: 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+
+  const usernameData = {
+    username: cleanUsername,
+    partnerCode: finalCode,
+    partnerId: finalCode,
+    authUid: authUid ? String(authUid).trim() : '',
+    internalEmail: loginEmail,
+    shopName: String(shopName).trim(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+
+  const batch = writeBatch(db);
+  batch.set(partnerDocRef, partnerData);
+  batch.set(doc(db, USERNAMES_COLLECTION, cleanUsername), usernameData);
+  await batch.commit();
+
+  return { id: finalCode, ...partnerData, loginEmail };
 }
 
 /**
- * Changes a partner's username using Cloud Function changePartnerUsername.
- * Safely updates Authentication account, releases old username, and claims new username atomically.
+ * Changes a partner's username in Firestore:
+ * Releases the old username mapping and reserves the new one atomically.
  */
 export async function changePartnerUsername(partnerId, newUsername) {
-  const cleanNew = String(newUsername || '').toLowerCase().trim();
+  const cleanNew = normalizeUsername(newUsername);
   if (!cleanNew || cleanNew.length < 3) {
     throw new Error('Username must be at least 3 characters long.');
   }
 
-  try {
-    const changeUsernameFn = httpsCallable(functions, 'changePartnerUsername');
-    const result = await changeUsernameFn({
-      partnerId,
-      newUsername: cleanNew
-    });
-    return result.data;
-  } catch (err) {
-    throw formatCallableError(err, 'Failed to update partner username.');
+  const check = await checkUsernameAvailability(cleanNew, partnerId);
+  if (!check.available) {
+    throw new Error(check.reason);
   }
+
+  const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
+  const partnerSnap = await getDoc(partnerRef);
+  if (!partnerSnap.exists()) {
+    throw new Error('Partner not found.');
+  }
+
+  const partnerData = partnerSnap.data();
+  const oldUsername = normalizeUsername(partnerData.username);
+  const newLoginEmail = usernameToEmail(cleanNew);
+
+  const batch = writeBatch(db);
+  if (oldUsername && oldUsername !== cleanNew) {
+    batch.delete(doc(db, USERNAMES_COLLECTION, oldUsername));
+  }
+  batch.set(doc(db, USERNAMES_COLLECTION, cleanNew), {
+    username: cleanNew,
+    partnerCode: partnerData.partnerCode || partnerId,
+    partnerId: partnerId,
+    authUid: partnerData.authUid || '',
+    internalEmail: newLoginEmail,
+    shopName: partnerData.shopName || '',
+    updatedAt: serverTimestamp()
+  });
+  batch.update(partnerRef, {
+    username: cleanNew,
+    loginEmail: newLoginEmail,
+    updatedAt: serverTimestamp()
+  });
+
+  await batch.commit();
+  return { success: true, newUsername: cleanNew, newLoginEmail };
 }
 
 /**
- * Resets a partner's password using trusted Cloud Function resetPartnerPassword.
- * Updates the existing Firebase Authentication account without creating duplicates.
+ * Updates a partner's linked Firebase Auth UID
  */
-export async function resetPartnerPassword(partnerId, newPassword) {
-  if (!newPassword || String(newPassword).length < 6) {
-    throw new Error('New password must be at least 6 characters long.');
-  }
+export async function linkPartnerAuthUid(partnerId, authUid) {
+  const cleanUid = String(authUid || '').trim();
+  const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
+  const partnerSnap = await getDoc(partnerRef);
+  if (!partnerSnap.exists()) throw new Error('Partner not found.');
 
-  try {
-    const resetPasswordFn = httpsCallable(functions, 'resetPartnerPassword');
-    const result = await resetPasswordFn({
-      partnerId,
-      newPassword: String(newPassword)
-    });
-    return result.data;
-  } catch (err) {
-    throw formatCallableError(err, 'Failed to reset partner password.');
+  const partnerData = partnerSnap.data();
+  const username = normalizeUsername(partnerData.username);
+
+  const batch = writeBatch(db);
+  batch.update(partnerRef, {
+    authUid: cleanUid,
+    updatedAt: serverTimestamp()
+  });
+  if (username) {
+    batch.set(doc(db, USERNAMES_COLLECTION, username), {
+      authUid: cleanUid,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
   }
+  await batch.commit();
+  return { success: true, authUid: cleanUid };
 }
 
 /**
@@ -202,35 +278,163 @@ export async function updatePartner(partnerId, updateFields) {
 
 /**
  * Toggles partner active state (activation / deactivation).
- * Uses Cloud Function togglePartnerStatus to enable/disable Firebase Auth login and update Firestore.
+ * Does not release the username when merely deactivated.
  */
 export async function togglePartnerStatus(partnerId, isActive) {
   if (!partnerId) throw new Error('Partner ID is required.');
-  try {
-    const toggleStatusFn = httpsCallable(functions, 'togglePartnerStatus');
-    const result = await toggleStatusFn({ partnerId, isActive });
-    return result.data;
-  } catch (err) {
-    throw formatCallableError(err, 'Failed to toggle partner status.');
-  }
+  const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
+  await updateDoc(partnerRef, {
+    isActive,
+    updatedAt: serverTimestamp()
+  });
+  return { success: true, isActive };
 }
 
 /**
- * Permanently deletes a partner shop using trusted Cloud Function deletePartnerAccount.
- * 1. Preserves all linked wedding cards and payments (unlinks partner, sets Former Partner)
- * 2. Deletes the associated Firebase Authentication user account
- * 3. Releases the username mapping so it can be reused immediately
- * 4. Deletes the partner document from Firestore
+ * Permanently deletes a partner shop in Firestore on the Spark plan:
+ * 1. Preserves all linked wedding cards and payment records by unlinking partner
+ * 2. Deletes the partner document from wedding_partners
+ * 3. Deletes the username document from partner_usernames, immediately releasing the username
  */
 export async function deletePartner(partnerId) {
   if (!partnerId) throw new Error('Partner ID is required.');
-  try {
-    const deleteFn = httpsCallable(functions, 'deletePartnerAccount');
-    const result = await deleteFn({ partnerId });
-    return result.data;
-  } catch (err) {
-    throw formatCallableError(err, 'Failed to delete partner account.');
+
+  const partnerRef = doc(db, PARTNERS_COLLECTION, partnerId);
+  const partnerSnap = await getDoc(partnerRef);
+  if (!partnerSnap.exists()) {
+    throw new Error('Partner record not found.');
   }
+
+  const partnerData = partnerSnap.data();
+  const shopName = partnerData.shopName || 'Deleted Partner';
+  const cleanUsername = normalizeUsername(partnerData.username);
+
+  // Preserve all historical wedding cards
+  const cardsQuery = query(collection(db, CARDS_COLLECTION), where('partnerId', '==', partnerId));
+  const cardsSnap = await getDocs(cardsQuery);
+  if (!cardsSnap.empty) {
+    const cardsBatch = writeBatch(db);
+    cardsSnap.forEach(cardDoc => {
+      cardsBatch.update(cardDoc.ref, {
+        partnerId: '',
+        partnerShopName: `${shopName} (Former Partner)`,
+        source: 'direct',
+        updatedAt: serverTimestamp()
+      });
+    });
+    await cardsBatch.commit();
+  }
+
+  // Atomically delete partner and release username mapping
+  const cleanupBatch = writeBatch(db);
+  if (cleanUsername) {
+    cleanupBatch.delete(doc(db, USERNAMES_COLLECTION, cleanUsername));
+  }
+  cleanupBatch.delete(partnerRef);
+  await cleanupBatch.commit();
+
+  return {
+    success: true,
+    releasedUsername: cleanUsername,
+    authUid: partnerData.authUid,
+    loginEmail: partnerData.loginEmail || usernameToEmail(cleanUsername)
+  };
+}
+
+/**
+ * Sends a standard Firebase Auth password reset email to a partner's personal/real email
+ */
+export async function sendPartnerPasswordResetEmail(email) {
+  if (!email || !email.includes('@')) {
+    throw new Error('A valid email address is required to send a password reset link.');
+  }
+  await sendPasswordResetEmail(auth, email.trim());
+}
+
+/**
+ * Diagnostic utility: Scans Firestore to find orphaned usernames, missing mappings, and UID mismatches
+ */
+export async function diagnosePartnerDataConsistency() {
+  const [partnersSnap, usernamesSnap] = await Promise.all([
+    getDocs(collection(db, PARTNERS_COLLECTION)),
+    getDocs(collection(db, USERNAMES_COLLECTION))
+  ]);
+
+  const partnersMap = new Map();
+  partnersSnap.forEach(docSnap => {
+    partnersMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+  });
+
+  const usernamesMap = new Map();
+  usernamesSnap.forEach(docSnap => {
+    usernamesMap.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+  });
+
+  const orphanedUsernames = [];
+  const missingUsernameDocs = [];
+  const unlinkedPartners = [];
+  const inactivePartners = [];
+
+  // 1. Check for usernames in partner_usernames whose partner is missing
+  for (const [username, data] of usernamesMap.entries()) {
+    const partnerId = data.partnerId || data.partnerCode;
+    if (!partnerId || !partnersMap.has(partnerId)) {
+      orphanedUsernames.push({
+        username,
+        data,
+        reason: partnerId ? `Partner ID "${partnerId}" does not exist in wedding_partners` : 'Missing partnerId reference'
+      });
+    }
+  }
+
+  // 2. Check for partners whose username document is missing or mismatched
+  for (const [partnerId, partner] of partnersMap.entries()) {
+    const cleanUser = normalizeUsername(partner.username);
+    if (!cleanUser || !usernamesMap.has(cleanUser)) {
+      missingUsernameDocs.push({
+        partnerId,
+        shopName: partner.shopName,
+        expectedUsername: cleanUser || partner.partnerCode?.toLowerCase()
+      });
+    }
+
+    if (!partner.authUid) {
+      unlinkedPartners.push({
+        partnerId,
+        shopName: partner.shopName,
+        username: partner.username,
+        loginEmail: partner.loginEmail || usernameToEmail(partner.username)
+      });
+    }
+
+    if (partner.isActive === false) {
+      inactivePartners.push({
+        partnerId,
+        shopName: partner.shopName,
+        username: partner.username
+      });
+    }
+  }
+
+  return {
+    totalPartners: partnersMap.size,
+    totalUsernames: usernamesMap.size,
+    orphanedUsernames,
+    missingUsernameDocs,
+    unlinkedPartners,
+    inactivePartners
+  };
+}
+
+/**
+ * Releases an orphaned username from partner_usernames
+ */
+export async function releaseOrphanedUsername(username) {
+  const clean = normalizeUsername(username);
+  if (!clean) throw new Error('Username required.');
+  const usernameRef = doc(db, USERNAMES_COLLECTION, clean);
+  await deleteDoc(usernameRef);
+  return { success: true, releasedUsername: clean };
 }
 
 /**

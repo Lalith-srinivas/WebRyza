@@ -285,9 +285,12 @@ export default function PartnerModal({ partner, isOpen, onClose, onSave }) {
                     style={{ fontFamily: 'monospace' }}
                     required
                   />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    Letters, numbers, underscores (e.g. lakshmicards)
-                  </span>
+                  <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Login Address:{' '}
+                    <code style={{ color: 'var(--accent-neon)' }}>
+                      {formData.username ? `${formData.username.toLowerCase().trim().replace(/[^a-z0-9_-]/g, '')}@partner.webryza.in` : 'username@partner.webryza.in'}
+                    </code>
+                  </div>
                 </div>
 
                 <div className="form-group">

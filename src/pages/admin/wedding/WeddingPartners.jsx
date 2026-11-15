@@ -14,7 +14,8 @@ import {
   Check, 
   Trash2,
   Key,
-  Lock
+  Lock,
+  Activity
 } from 'lucide-react';
 import { 
   createPartner, 
@@ -22,7 +23,6 @@ import {
   togglePartnerStatus, 
   deletePartner,
   changePartnerUsername,
-  resetPartnerPassword,
   subscribeToPartners,
   subscribeToWeddingCards
 } from '../../../services/weddingService';
@@ -33,6 +33,7 @@ import PartnerDetailModal from '../../../components/admin/wedding/PartnerDetailM
 import WeddingProjectDetailModal from '../../../components/admin/wedding/WeddingProjectDetailModal';
 import ChangeUsernameModal from '../../../components/admin/wedding/ChangeUsernameModal';
 import ResetPasswordModal from '../../../components/admin/wedding/ResetPasswordModal';
+import PartnerDiagnosticModal from '../../../components/admin/wedding/PartnerDiagnosticModal';
 import Toast from '../../../components/admin/wedding/Toast';
 
 export default function WeddingPartners() {
@@ -46,6 +47,7 @@ export default function WeddingPartners() {
 
   // Modals
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
   const [editingPartner, setEditingPartner] = useState(null);
   const [qrPartner, setQrPartner] = useState(null);
   const [detailPartner, setDetailPartner] = useState(null);
@@ -98,8 +100,11 @@ export default function WeddingPartners() {
         type: 'success',
         message: `Registered partner ${created.shopName} (${created.partnerCode})! QR & credentials generated.`
       });
-      // Show QR and link copy options immediately
-      setQrPartner(created);
+      // Show QR and link copy options immediately, with intended password for Firebase Console setup
+      setQrPartner({
+        ...created,
+        intendedPassword: partnerData.password
+      });
     }
   };
 
@@ -113,14 +118,6 @@ export default function WeddingPartners() {
     if (detailPartner && detailPartner.id === partnerId) {
       setDetailPartner((prev) => ({ ...prev, username: newUsername }));
     }
-  };
-
-  const handleResetPassword = async (partnerId, newPassword) => {
-    await resetPartnerPassword(partnerId, newPassword);
-    setToast({
-      type: 'success',
-      message: 'Partner password has been reset securely in Firebase Auth!'
-    });
   };
 
   const handleToggleStatus = async (partnerId, newStatus) => {
@@ -167,10 +164,10 @@ export default function WeddingPartners() {
   const executeDeletePartner = async () => {
     if (!deleteConfirmPartner) return;
     try {
-      await deletePartner(deleteConfirmPartner.id);
+      const res = await deletePartner(deleteConfirmPartner.id);
       setToast({
         type: 'success',
-        message: `Partner "${deleteConfirmPartner.shopName}" deleted and username released successfully.`
+        message: `Partner "${deleteConfirmPartner.shopName}" deleted and username "${res.releasedUsername}" released successfully.`
       });
       setDeleteConfirmPartner(null);
       if (detailPartner?.id === deleteConfirmPartner.id) {
@@ -231,12 +228,20 @@ export default function WeddingPartners() {
         </select>
 
         <button
+          className="btn btn-secondary"
+          onClick={() => setIsDiagnosticOpen(true)}
+          title="Audit username mappings, orphaned records, and UID consistency"
+          style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+        >
+          <Activity size={16} color="var(--accent-neon)" /> Data Diagnostics
+        </button>
+
+        <button
           className="btn btn-primary"
           onClick={() => {
             setEditingPartner(null);
             setIsAddEditModalOpen(true);
           }}
-          style={{ marginLeft: 'auto' }}
         >
           <Plus size={18} style={{ marginRight: '0.4rem' }} /> Add Partner
         </button>
@@ -506,7 +511,6 @@ export default function WeddingPartners() {
         partner={passwordPartner}
         isOpen={Boolean(passwordPartner)}
         onClose={() => setPasswordPartner(null)}
-        onResetPassword={handleResetPassword}
       />
 
       {/* Partner Detail Modal */}
@@ -540,6 +544,13 @@ export default function WeddingPartners() {
         onClose={() => setSelectedProject(null)}
         onShowToast={(t) => setToast(t)}
         onProjectUpdated={() => {}}
+      />
+
+      {/* System Diagnostics & Stale Username Cleanup Modal */}
+      <PartnerDiagnosticModal
+        isOpen={isDiagnosticOpen}
+        onClose={() => setIsDiagnosticOpen(false)}
+        onShowToast={(t) => setToast(t)}
       />
 
       {/* Delete Partner Confirmation Modal */}

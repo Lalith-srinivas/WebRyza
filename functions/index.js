@@ -11,6 +11,7 @@ const db = admin.firestore();
 const ALLOWED_ORIGINS = [
   'https://www.webryza.in',
   'https://webryza.in',
+  'https://cards.webryza.in',
   'http://localhost:5173',
   'http://localhost:3000',
   'http://127.0.0.1:5173'

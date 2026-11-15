@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion as Motion } from 'framer-motion';
-import { X, Key, User, Check, AlertCircle } from 'lucide-react';
+import { X, Key, User, ExternalLink } from 'lucide-react';
+import { usernameToEmail, normalizeUsername } from '../../../services/weddingService';
 
 export default function ChangeUsernameModal({ partner, isOpen, onClose, onChangeUsername }) {
   const [newUsername, setNewUsername] = useState('');
@@ -17,35 +18,34 @@ export default function ChangeUsernameModal({ partner, isOpen, onClose, onChange
 
   if (!isOpen || !partner) return null;
 
+  const currentClean = normalizeUsername(partner.username || partner.partnerCode);
+  const prospectiveClean = normalizeUsername(newUsername);
+  const prospectiveEmail = usernameToEmail(prospectiveClean);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const clean = newUsername.toLowerCase().trim();
 
-    if (!clean) {
+    if (!prospectiveClean) {
       setError('Please enter a new username.');
       return;
     }
-    if (clean === (partner.username || '').toLowerCase().trim()) {
+    if (prospectiveClean === currentClean) {
       setError('New username must be different from current username.');
       return;
     }
-    if (!/^[a-zA-Z0-9_-]{3,30}$/.test(clean)) {
-      setError('Username must be 3-30 characters long (letters, numbers, hyphens, and underscores only).');
+    if (!/^[a-z0-9_-]{3,30}$/.test(prospectiveClean)) {
+      setError('Username must be 3-30 characters long (lowercase letters, numbers, hyphens, and underscores only).');
       return;
     }
 
     try {
       setIsSubmitting(true);
       setError('');
-      await onChangeUsername(partner.id, clean);
+      await onChangeUsername(partner.id, prospectiveClean);
       onClose();
     } catch (err) {
       console.error('Error changing username:', err);
-      let msg = err.message || 'Failed to update username.';
-      if (msg.toLowerCase() === 'internal' || err.code === 'functions/internal') {
-        msg = 'Cloud Function unavailable or encountered an error. Please verify backend functions or retry.';
-      }
-      setError(msg);
+      setError(err.message || 'Failed to update username.');
     } finally {
       setIsSubmitting(false);
     }
@@ -55,7 +55,7 @@ export default function ChangeUsernameModal({ partner, isOpen, onClose, onChange
     <div className="modal-overlay" onClick={onClose}>
       <Motion.div
         className="modal-content bg-glass"
-        style={{ maxWidth: '460px' }}
+        style={{ maxWidth: '480px' }}
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
@@ -69,7 +69,7 @@ export default function ChangeUsernameModal({ partner, isOpen, onClose, onChange
           Change Partner Username
         </h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-          Update the login username for <strong>{partner.shopName}</strong> ({partner.partnerCode}).
+          Update the portal username for <strong>{partner.shopName}</strong> ({partner.partnerCode}).
         </p>
 
         {/* Current Username Info */}
@@ -86,7 +86,10 @@ export default function ChangeUsernameModal({ partner, isOpen, onClose, onChange
           <div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Current Username</div>
             <div style={{ fontFamily: 'monospace', fontWeight: 600, color: 'white', fontSize: '1rem', marginTop: '0.2rem' }}>
-              {partner.username || 'Not configured'}
+              {currentClean || 'Not configured'}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+              Email: <code>{usernameToEmail(currentClean)}</code>
             </div>
           </div>
           <span className="partner-code-tag">{partner.partnerCode}</span>
@@ -100,20 +103,16 @@ export default function ChangeUsernameModal({ partner, isOpen, onClose, onChange
             padding: '0.75rem 1rem',
             borderRadius: '12px',
             marginBottom: '1.25rem',
-            fontSize: '0.85rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
+            fontSize: '0.85rem'
           }}>
-            <AlertCircle size={16} />
-            <span>{error}</span>
+            {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="admin-form">
-          <div className="form-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <User size={15} color="var(--accent-neon)" /> New Username *
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+              <User size={15} color="var(--accent-neon)" /> New Unique Username *
             </label>
             <input
               type="text"
@@ -123,27 +122,41 @@ export default function ChangeUsernameModal({ partner, isOpen, onClose, onChange
               style={{ fontFamily: 'monospace' }}
               required
             />
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              Internal login address will update to: {newUsername ? `${newUsername.toLowerCase().trim()}@partner.webryza.in` : 'username@partner.webryza.in'}
-            </span>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>
+              New Login Address: <code style={{ color: 'var(--accent-neon)' }}>{prospectiveEmail || '...'}</code>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            padding: '0.75rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.75rem',
+            color: 'var(--text-secondary)',
+            lineHeight: '1.4'
+          }}>
+            <strong>Important Spark Note:</strong> Updating here immediately releases the old username in Firestore and reserves the new one. If you maintain this account in Firebase Console, update the user email to <code>{prospectiveEmail || 'new email'}</code> in Firebase Console as well.
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button
               type="button"
               className="btn btn-secondary"
               onClick={onClose}
-              style={{ flex: 1 }}
               disabled={isSubmitting}
+              style={{ flex: 1 }}
             >
               Cancel
             </button>
             <button
               type="submit"
               className="btn btn-primary"
-              style={{ flex: 1 }}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !prospectiveClean}
+              style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
             >
+              <Key size={16} />
               {isSubmitting ? 'Updating...' : 'Update Username'}
             </button>
           </div>

@@ -8,16 +8,24 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // WebRyza Administrator: Any authenticated staff member who is not a partner
-    function isAdmin() {
-      return isAuthenticated() && 
-        (!('role' in request.auth.token) || request.auth.token.role != 'partner');
-    }
-
-    // Partner Role
+    // Identifies partner login accounts via their deterministic synthetic email domain
     function isPartner() {
       return isAuthenticated() && 
-        ('role' in request.auth.token && request.auth.token.role == 'partner');
+        request.auth.token.email.matches('.*@partner\\.webryza\\.in$');
+    }
+
+    // WebRyza Administrator: Any authenticated staff member who is not a partner
+    function isAdmin() {
+      return isAuthenticated() && !isPartner();
+    }
+
+    // Helper to check if a partner owns a record via their authUid in wedding_partners
+    function isPartnerRecordOwner(partnerId) {
+      return isPartner() && 
+        partnerId != null && 
+        partnerId != '' &&
+        exists(/databases/$(database)/documents/wedding_partners/$(partnerId)) &&
+        get(/databases/$(database)/documents/wedding_partners/$(partnerId)).data.authUid == request.auth.uid;
     }
 
     // ==================================================
@@ -34,12 +42,8 @@ service cloud.firestore {
       // Administrators have full control
       allow read, write: if isAdmin();
 
-      // Partners can only read their own record (cannot edit metrics or credentials)
-      allow get: if isPartner() && (
-        request.auth.uid == resource.data.authUid ||
-        request.auth.token.partnerCode == partnerId ||
-        request.auth.token.partnerId == partnerId
-      );
+      // Partners can read only their own partner profile established by their authUid
+      allow get: if isPartner() && resource.data.authUid == request.auth.uid;
 
       // Public registration form can read active partner info to display shop name
       // and verify active referral status
@@ -50,8 +54,10 @@ service cloud.firestore {
     // 3. Partner Usernames Mapping Collection
     // ==================================================
     match /partner_usernames/{username} {
+      // Administrators have full control (manage mappings, release stale usernames)
       allow read, write: if isAdmin();
-      // Public / partner login lookup
+
+      // Public / partner portal login lookup
       allow get: if true;
     }
 
@@ -62,11 +68,8 @@ service cloud.firestore {
       // Administrators have full control
       allow read, write: if isAdmin();
 
-      // Partners can only read wedding projects that belong to their partner ID
-      allow read: if isPartner() && (
-        resource.data.partnerId == request.auth.token.partnerCode ||
-        resource.data.partnerId == request.auth.token.partnerId
-      );
+      // Partners can read only the wedding projects that belong to their verified shop
+      allow read: if isPartnerRecordOwner(resource.data.partnerId);
 
       // Secure public submission from cards.webryza.in registration form:
       // Validates required fields, enforces minimum ₹1,500 charge,
@@ -97,10 +100,7 @@ service cloud.firestore {
       allow read, write: if isAdmin();
 
       // Partners can read recorded payment receipts for their own projects only
-      allow read: if isPartner() && (
-        resource.data.partnerId == request.auth.token.partnerCode ||
-        resource.data.partnerId == request.auth.token.partnerId
-      );
+      allow read: if isPartnerRecordOwner(resource.data.partnerId);
     }
   }
 }

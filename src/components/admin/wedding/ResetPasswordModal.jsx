@@ -1,53 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion as Motion } from 'framer-motion';
-import { X, Lock, Eye, EyeOff, ShieldCheck, AlertCircle } from 'lucide-react';
+import { X, ExternalLink, Mail, Copy, Check, ShieldAlert, KeyRound, CheckCircle2 } from 'lucide-react';
+import { usernameToEmail, sendPartnerPasswordResetEmail } from '../../../services/weddingService';
 
-export default function ResetPasswordModal({ partner, isOpen, onClose, onResetPassword }) {
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+export default function ResetPasswordModal({ partner, isOpen, onClose }) {
+  const [copiedEmail, setCopiedEmail] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (isOpen && partner) {
-      setNewPassword('');
-      setConfirmPassword('');
-      setShowPassword(false);
-      setError('');
-      setIsSubmitting(false);
-    }
-  }, [isOpen, partner]);
 
   if (!isOpen || !partner) return null;
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const loginUsername = (partner.username || partner.partnerCode || '').toLowerCase().trim();
+  const loginEmail = partner.loginEmail || usernameToEmail(loginUsername);
+  const contactEmail = (partner.email || '').trim();
 
-    if (!newPassword || newPassword.length < 6) {
-      setError('Password must be at least 6 characters long.');
-      return;
-    }
+  const handleCopyEmail = () => {
+    navigator.clipboard.writeText(loginEmail);
+    setCopiedEmail(true);
+    setTimeout(() => setCopiedEmail(false), 2000);
+  };
 
-    if (newPassword !== confirmPassword) {
-      setError('Passwords do not match.');
+  const handleSendResetEmail = async () => {
+    if (!contactEmail) {
+      setError('This partner has no contact email recorded. Please use the Firebase Console option below or edit partner details.');
       return;
     }
 
     try {
-      setIsSubmitting(true);
+      setIsSendingEmail(true);
       setError('');
-      await onResetPassword(partner.id, newPassword);
-      onClose();
+      await sendPartnerPasswordResetEmail(contactEmail);
+      setEmailSuccess(true);
+      setTimeout(() => setEmailSuccess(false), 5000);
     } catch (err) {
-      console.error('Error resetting password:', err);
-      let msg = err.message || 'Failed to reset partner password.';
-      if (msg.toLowerCase() === 'internal' || err.code === 'functions/internal') {
-        msg = 'Cloud Function unavailable or encountered an error. Please verify backend functions or retry.';
-      }
-      setError(msg);
+      console.error('Failed to send reset email:', err);
+      setError(err.message || 'Failed to send password reset email.');
     } finally {
-      setIsSubmitting(false);
+      setIsSendingEmail(false);
     }
   };
 
@@ -55,7 +45,7 @@ export default function ResetPasswordModal({ partner, isOpen, onClose, onResetPa
     <div className="modal-overlay" onClick={onClose}>
       <Motion.div
         className="modal-content bg-glass"
-        style={{ maxWidth: '460px' }}
+        style={{ maxWidth: '520px' }}
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
@@ -66,30 +56,58 @@ export default function ResetPasswordModal({ partner, isOpen, onClose, onResetPa
         </button>
 
         <h2 style={{ fontFamily: 'Playfair Display', color: 'var(--accent-neon)', marginBottom: '0.25rem' }}>
-          Reset Partner Password
+          Partner Password Management
         </h2>
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-          Set a new login password for <strong>{partner.shopName}</strong> ({partner.partnerCode}).
+          Manage credentials for <strong>{partner.shopName}</strong> ({partner.partnerCode}) on the Firebase Spark plan.
         </p>
 
-        {/* Partner Credential Target Info */}
+        {/* Partner Identity Card */}
         <div style={{
           background: 'var(--bg-tertiary)',
           border: '1px solid var(--border-color)',
           borderRadius: '12px',
-          padding: '0.85rem 1rem',
-          marginBottom: '1.25rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
+          padding: '1rem',
+          marginBottom: '1.25rem'
         }}>
-          <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Login Account</div>
-            <div style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--accent-neon)', fontSize: '0.95rem', marginTop: '0.2rem' }}>
-              {partner.username || partner.partnerCode.toLowerCase()}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Portal Username
+            </span>
+            <span className="partner-code-tag">{partner.partnerCode}</span>
+          </div>
+          <div style={{ fontFamily: 'monospace', fontWeight: 600, color: 'white', fontSize: '1.05rem', marginBottom: '0.75rem' }}>
+            {loginUsername}
+          </div>
+
+          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>
+              Firebase Authentication Login Email:
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <code style={{
+                background: 'rgba(0,0,0,0.4)',
+                padding: '0.35rem 0.6rem',
+                borderRadius: '6px',
+                color: 'var(--accent-neon)',
+                fontSize: '0.85rem',
+                flex: 1,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }}>
+                {loginEmail}
+              </code>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleCopyEmail}
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+              >
+                {copiedEmail ? <Check size={14} color="var(--accent-neon)" /> : <Copy size={14} />}
+                {copiedEmail ? 'Copied' : 'Copy'}
+              </button>
             </div>
           </div>
-          <span className="partner-code-tag">{partner.partnerCode}</span>
         </div>
 
         {error && (
@@ -100,96 +118,126 @@ export default function ResetPasswordModal({ partner, isOpen, onClose, onResetPa
             padding: '0.75rem 1rem',
             borderRadius: '12px',
             marginBottom: '1.25rem',
+            fontSize: '0.85rem'
+          }}>
+            {error}
+          </div>
+        )}
+
+        {emailSuccess && (
+          <div style={{
+            background: 'rgba(57, 255, 20, 0.1)',
+            border: '1px solid rgba(57, 255, 20, 0.3)',
+            color: 'var(--accent-neon)',
+            padding: '0.75rem 1rem',
+            borderRadius: '12px',
+            marginBottom: '1.25rem',
             fontSize: '0.85rem',
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem'
           }}>
-            <AlertCircle size={16} />
-            <span>{error}</span>
+            <CheckCircle2 size={16} /> Password reset email sent successfully!
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="admin-form">
-          <div className="form-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Lock size={15} color="var(--accent-neon)" /> New Password *
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="Enter new password (min 6 characters)"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                style={{ paddingRight: '2.5rem' }}
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                style={{
-                  position: 'absolute',
-                  right: '0.75rem',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
+        {/* Option 1: Manual Console Workflow */}
+        <div style={{
+          background: 'rgba(255, 255, 255, 0.02)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '12px',
+          padding: '1rem',
+          marginBottom: '1rem'
+        }}>
+          <div style={{ fontWeight: 600, color: 'white', fontSize: '0.9rem', marginBottom: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <KeyRound size={16} color="var(--accent-neon)" /> Option 1: Set New Password in Firebase Console
           </div>
-
-          <div className="form-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <ShieldCheck size={15} color="var(--accent-neon)" /> Confirm New Password *
-            </label>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              placeholder="Confirm new password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-            />
-          </div>
-
-          <div style={{
-            background: 'rgba(57, 255, 20, 0.04)',
-            border: '1px solid rgba(57, 255, 20, 0.2)',
-            borderRadius: '10px',
-            padding: '0.65rem 0.85rem',
-            fontSize: '0.8rem',
-            color: 'var(--text-secondary)',
-            marginBottom: '1.25rem'
-          }}>
-            Passwords are updated securely in Firebase Authentication. They are never saved or exposed in plaintext.
-          </div>
-
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={onClose}
-              style={{ flex: 1 }}
-              disabled={isSubmitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: '1.4', marginBottom: '0.75rem' }}>
+            On the Firebase Spark plan, administrator-initiated password resets are securely performed directly in the Firebase Console:
+          </p>
+          <ol style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', paddingLeft: '1.25rem', margin: 0, lineHeight: '1.5' }}>
+            <li>Copy the login email: <code>{loginEmail}</code></li>
+            <li>Open the Firebase Console Users tab using the button below.</li>
+            <li>Locate the user, click the <strong>three dots (⋮)</strong>, and select <strong>Reset password</strong> or <strong>Change password</strong>.</li>
+          </ol>
+          <div style={{ marginTop: '0.85rem' }}>
+            <a
+              href="https://console.firebase.google.com/project/webryza-admin/authentication/users"
+              target="_blank"
+              rel="noopener noreferrer"
               className="btn btn-primary"
-              style={{ flex: 1 }}
-              disabled={isSubmitting}
+              style={{
+                width: '100%',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                textDecoration: 'none',
+                fontSize: '0.85rem',
+                padding: '0.6rem 1rem'
+              }}
             >
-              {isSubmitting ? 'Resetting...' : 'Save New Password'}
-            </button>
+              Open Firebase Console Authentication <ExternalLink size={14} />
+            </a>
           </div>
-        </form>
+        </div>
+
+        {/* Option 2: Email Reset Link */}
+        <div style={{
+          background: 'rgba(255, 255, 255, 0.02)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '12px',
+          padding: '1rem',
+          marginBottom: '1rem'
+        }}>
+          <div style={{ fontWeight: 600, color: 'white', fontSize: '0.9rem', marginBottom: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <Mail size={16} color="#2196f3" /> Option 2: Send Password Reset Link to Contact Email
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', lineHeight: '1.4', marginBottom: '0.75rem' }}>
+            {contactEmail ? (
+              <>Sends a secure Firebase reset link to partner&apos;s personal email: <strong>{contactEmail}</strong></>
+            ) : (
+              <>No personal contact email on record for this shop. You can add one in Edit Partner.</>
+            )}
+          </p>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleSendResetEmail}
+            disabled={!contactEmail || isSendingEmail}
+            style={{ width: '100%', fontSize: '0.85rem', padding: '0.6rem 1rem' }}
+          >
+            {isSendingEmail ? 'Sending Reset Link...' : 'Send Password Reset Email'}
+          </button>
+        </div>
+
+        {/* Security Note */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '0.5rem',
+          color: 'var(--text-secondary)',
+          fontSize: '0.75rem',
+          lineHeight: '1.4',
+          padding: '0.5rem 0.25rem'
+        }}>
+          <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: '2px', color: '#ffb300' }} />
+          <span>
+            Partners can also change their password themselves after logging in at{' '}
+            <strong style={{ color: 'white' }}>cards.webryza.in/admin</strong>.
+          </span>
+        </div>
+
+        <div style={{ marginTop: '1rem' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onClose}
+            style={{ width: '100%' }}
+          >
+            Close
+          </button>
+        </div>
       </Motion.div>
     </div>
   );
